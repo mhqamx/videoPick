@@ -1,14 +1,22 @@
 # Douyin Resolver Backend (Codespaces)
 
-A lightweight backend service for resolving Douyin share links using `yt-dlp`.
+A lightweight backend service for resolving Douyin share links with local parsing (no `yt-dlp` dependency).
 
-## Why this works better
-Client-side requests are often blocked by Douyin anti-crawler rules (e.g. 404 on `aweme/v1/play`).
-Running resolution on a server with `yt-dlp` is more stable.
+## Architecture (extensible)
+- `app/extractors/base.py`: extractor contract
+- `app/extractors/douyin.py`: Douyin extractor implementation
+- `app/extractors/registry.py`: extractor registry/router
+- `app/local_resolver.py`: Douyin local parse + download proxy helpers
+
+To add a new platform (e.g. Kuaishou/Bilibili/TikTok):
+1. Add `app/extractors/<platform>.py` implementing `extract_url/resolve/download_bytes`
+2. Register extractor in `ExtractorRegistry`
+3. Keep API unchanged (`/resolve` + `/download`)
 
 ## Endpoints
 - `GET /health`
 - `POST /resolve`
+- `GET /download?source=...`
 
 Request body:
 
@@ -26,10 +34,12 @@ Response body (example):
   "uploader": "...",
   "duration": 12.3,
   "video_id": "7607807621344562451",
-  "download_url": "https://...",
+  "download_url": "http://127.0.0.1:8000/download?source=...",
   "formats": []
 }
 ```
+
+`/resolve` returns a backend proxy URL in `download_url` so the iOS app downloads through backend instead of direct `aweme` URL.
 
 ## Run locally / in Codespaces
 
@@ -38,7 +48,6 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install -U yt-dlp
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -50,15 +59,6 @@ curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://v.douyin.com/oSWhN1HCRAM/"}'
 ```
-
-## Optional cookies
-If some videos require login/region cookies:
-
-```bash
-export DOUYIN_COOKIES_FILE=/workspaces/your-repo/cookies.txt
-```
-
-Then restart service.
 
 ## Deploy notes for Codespaces
 - Keep process alive with `uvicorn` in terminal, or use a process manager.
