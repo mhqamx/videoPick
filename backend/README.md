@@ -1,47 +1,56 @@
-# Douyin Resolver Backend (Codespaces)
+# Backend Resolver Service
 
-A lightweight backend service for resolving Douyin share links with local parsing (no `yt-dlp` dependency).
+本服务为 iOS 客户端提供视频解析与下载代理能力。
 
-## Architecture (extensible)
-- `app/extractors/base.py`: extractor contract
-- `app/extractors/douyin.py`: Douyin extractor implementation
-- `app/extractors/registry.py`: extractor registry/router
-- `app/local_resolver.py`: Douyin local parse + download proxy helpers
+当前特点：
+- 不依赖 `yt-dlp`
+- 本地解析抖音分享页数据（`_ROUTER_DATA/_SSR_HYDRATED_DATA/RENDER_DATA`）
+- 提供统一 API 给 iOS 调用
+- 架构支持后续扩展到更多平台
 
-To add a new platform (e.g. Kuaishou/Bilibili/TikTok):
-1. Add `app/extractors/<platform>.py` implementing `extract_url/resolve/download_bytes`
-2. Register extractor in `ExtractorRegistry`
-3. Keep API unchanged (`/resolve` + `/download`)
+## API
 
-## Endpoints
-- `GET /health`
-- `POST /resolve`
-- `GET /download?source=...`
+### `GET /health`
+健康检查。
 
-Request body:
+### `POST /resolve`
+输入分享文本或链接，返回视频元信息与代理下载地址。
+
+请求：
 
 ```json
-{ "text": "看春晚，玩AI！https://v.douyin.com/oSWhN1HCRAM/" }
+{ "text": "https://v.douyin.com/xxxx/" }
 ```
 
-Response body (example):
+响应示例：
 
 ```json
 {
-  "input_url": "https://v.douyin.com/oSWhN1HCRAM/",
-  "webpage_url": "https://www.douyin.com/video/7607807621344562451",
-  "title": "...",
-  "uploader": "...",
-  "duration": 12.3,
-  "video_id": "7607807621344562451",
-  "download_url": "http://127.0.0.1:8000/download?source=...",
+  "input_url": "https://v.douyin.com/xxxx/",
+  "webpage_url": "https://www.iesdouyin.com/share/video/xxxx",
+  "title": "[douyin] ...",
+  "video_id": "xxxx",
+  "download_url": "https://<your-host>/download?source=...",
   "formats": []
 }
 ```
 
-`/resolve` returns a backend proxy URL in `download_url` so the iOS app downloads through backend instead of direct `aweme` URL.
+### `GET /download?source=...`
+代理下载视频字节流（`video/mp4`），避免 iOS 直接请求源站失败。
 
-## Run locally / in Codespaces
+## 架构
+
+```text
+app/
+├── main.py                    # FastAPI 入口
+├── local_resolver.py          # 页面解析与下载候选逻辑
+└── extractors/
+    ├── base.py                # Extractor 协议
+    ├── douyin.py              # Douyin 实现
+    └── registry.py            # 路由与注册中心
+```
+
+## 本地运行
 
 ```bash
 cd backend
@@ -51,16 +60,26 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Test:
+快速测试：
 
 ```bash
 curl http://127.0.0.1:8000/health
 curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
-  -d '{"text":"https://v.douyin.com/oSWhN1HCRAM/"}'
+  -d '{"text":"https://v.douyin.com/A5YLrV02Hyw/"}'
 ```
 
-## Deploy notes for Codespaces
-- Keep process alive with `uvicorn` in terminal, or use a process manager.
-- Expose port `8000` as public in Codespaces Ports panel.
-- Use the public URL in your iOS app backend config.
+## Codespaces 部署
+
+1. 在 Codespaces 启动服务
+2. 暴露 `8000` 端口并设置为 `Public`
+3. 使用公网地址给 iOS 配置 backend
+
+## 扩展多平台
+
+新增平台时：
+1. 新建 `app/extractors/<platform>.py`
+2. 实现与 `base.py` 对齐的接口
+3. 在 `registry.py` 注册
+
+这样 iOS 无需改接口，只复用 `/resolve` + `/download`。
