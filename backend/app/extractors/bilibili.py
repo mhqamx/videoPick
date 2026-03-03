@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from urllib.parse import urlparse
 
 import httpx
@@ -50,18 +51,37 @@ class BilibiliExtractor:
         if not url:
             raise LocalResolveError("No Bilibili URL found in input")
 
+        webpage_url: str | None = None
+        title: str | None = None
+        candidates: list[str] = []
+
         try:
             with httpx.Client(timeout=20, follow_redirects=False) as client:
                 webpage_url = self._resolve_canonical_webpage_url(client, url)
-                html, webpage_url = self._fetch_html_with_retry(client, webpage_url)
+                video_id = self._extract_video_id_from_url(webpage_url) or f"bili_unknown_{int(time.time())}"
+
+                try:
+                    html, webpage_url = self._fetch_html_with_retry(client, webpage_url)
+                    title = self._extract_title_from_initial_state(html)
+                    candidates = self._extract_progressive_candidates(html)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code not in (403, 412):
+                        raise
+
+                if not candidates:
+                    api_title, api_candidates = self._resolve_via_open_api(
+                        client=client,
+                        video_id=video_id,
+                        referer_url=webpage_url,
+                    )
+                    title = title or api_title
+                    candidates = api_candidates
         except LocalResolveError:
             raise
         except Exception as exc:
             raise LocalResolveError(f"Bilibili resolve failed: {exc}") from exc
 
-        title = self._extract_title_from_initial_state(html)
-        video_id = self._extract_video_id_from_url(webpage_url) or f"bili_unknown_{int(time.time())}"
-        candidates = self._extract_progressive_candidates(html)
+        video_id = self._extract_video_id_from_url(webpage_url or "") or f"bili_unknown_{int(time.time())}"
 
         if not candidates:
             raise LocalResolveError("Bilibili DASH-only stream is not supported yet")
@@ -109,6 +129,25 @@ class BilibiliExtractor:
         }
 
     @staticmethod
+    def _api_headers(referer: str) -> dict[str, str]:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+            "Referer": referer,
+            "Origin": "https://www.bilibili.com",
+            "Cookie": (
+                f"buvid3={uuid.uuid4()}infoc; "
+                f"b_nut={int(time.time())}; "
+                "CURRENT_FNVAL=0; CURRENT_QUALITY=80"
+            ),
+        }
+
+    @staticmethod
     def _extract_video_id_from_url(url: str) -> str | None:
         match = re.search(r"/video/(BV[0-9A-Za-z]+|av[0-9]+)", url, re.I)
         return match.group(1) if match else None
@@ -122,6 +161,10 @@ class BilibiliExtractor:
         if not isinstance(data, dict):
             return []
 
+        return self._extract_durl_candidates(data)
+
+    @staticmethod
+    def _extract_durl_candidates(data: dict) -> list[str]:
         candidates: list[str] = []
         durl = data.get("durl")
         if isinstance(durl, list):
@@ -207,3 +250,78 @@ class BilibiliExtractor:
             resp = client.get(webpage_url, headers=alt_headers, follow_redirects=True)
         resp.raise_for_status()
         return resp.text, str(resp.url)
+
+    def _resolve_via_open_api(
+        self,
+        client: httpx.Client,
+        video_id: str,
+        referer_url: str,
+    ) -> tuple[str | None, list[str]]:
+        bvid, aid = self._split_video_id(video_id)
+        view_params: dict[str, str] = {"bvid": bvid} if bvid else {"aid": aid}
+        view_resp = client.get(
+            "https://api.bilibili.com/x/web-interface/view",
+            params=view_params,
+            headers=self._api_headers(referer=referer_url),
+            follow_redirects=True,
+        )
+        view_resp.raise_for_status()
+        view_payload = view_resp.json()
+        if not isinstance(view_payload, dict) or view_payload.get("code") != 0:
+            message = view_payload.get("message") if isinstance(view_payload, dict) else "invalid response"
+            raise LocalResolveError(f"Bilibili view api failed: {message}")
+
+        data = view_payload.get("data") if isinstance(view_payload, dict) else None
+        if not isinstance(data, dict):
+            raise LocalResolveError("Bilibili view api returned invalid data")
+
+        title = data.get("title") if isinstance(data.get("title"), str) else None
+        cid = data.get("cid")
+        if not isinstance(cid, int):
+            pages = data.get("pages")
+            if isinstance(pages, list) and pages and isinstance(pages[0], dict):
+                cid = pages[0].get("cid")
+        if not isinstance(cid, int):
+            raise LocalResolveError("Bilibili view api did not return cid")
+
+        play_params: dict[str, str | int] = {
+            "cid": cid,
+            "qn": 80,
+            "fnval": 0,
+            "fnver": 0,
+            "fourk": 1,
+            "otype": "json",
+            "platform": "html5",
+            "high_quality": 1,
+        }
+        if bvid:
+            play_params["bvid"] = bvid
+        else:
+            play_params["avid"] = aid
+
+        play_resp = client.get(
+            "https://api.bilibili.com/x/player/playurl",
+            params=play_params,
+            headers=self._api_headers(referer=referer_url),
+            follow_redirects=True,
+        )
+        play_resp.raise_for_status()
+        play_payload = play_resp.json()
+        if not isinstance(play_payload, dict) or play_payload.get("code") != 0:
+            message = play_payload.get("message") if isinstance(play_payload, dict) else "invalid response"
+            raise LocalResolveError(f"Bilibili playurl api failed: {message}")
+
+        play_data = play_payload.get("data") if isinstance(play_payload, dict) else None
+        if not isinstance(play_data, dict):
+            raise LocalResolveError("Bilibili playurl api returned invalid data")
+
+        candidates = self._extract_durl_candidates(play_data)
+        return title, candidates
+
+    @staticmethod
+    def _split_video_id(video_id: str) -> tuple[str | None, str | None]:
+        if video_id.upper().startswith("BV"):
+            return video_id, None
+        if video_id.lower().startswith("av"):
+            return None, video_id[2:]
+        raise LocalResolveError("Unsupported Bilibili video id format")

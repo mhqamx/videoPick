@@ -87,6 +87,18 @@ class TestParseHelpers:
         assert len(candidates) == 2
         assert candidates[0].endswith("main.mp4")
 
+    def test_extract_durl_candidates(self):
+        data = {
+            "durl": [
+                {
+                    "url": "https://upos-sz-mirrorcos.bilivideo.com/upgcxcode/main.mp4",
+                    "backup_url": ["https://upos-sz-mirrorcos.bilivideo.com/upgcxcode/backup.mp4"],
+                }
+            ]
+        }
+        candidates = self.ext._extract_durl_candidates(data)
+        assert len(candidates) == 2
+
     def test_extract_progressive_candidates_empty_when_dash_only(self):
         html = """
         <script>
@@ -102,6 +114,10 @@ class TestParseHelpers:
         </script>
         """
         assert self.ext._extract_progressive_candidates(html) == []
+
+    def test_split_video_id(self):
+        assert self.ext._split_video_id("BV1xx411c7mD") == ("BV1xx411c7mD", None)
+        assert self.ext._split_video_id("av170001") == (None, "170001")
 
 
 class TestRegistryIntegration:
