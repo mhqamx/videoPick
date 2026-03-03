@@ -12,6 +12,11 @@ import UIKit
 /// 抖音视频下载服务 (线程安全)
 actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
+    private let backendResolveURLs: [URL] = [
+        URL(string: "http://192.168.1.100:8000/resolve")!,
+        URL(string: "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve")!,
+        URL(string: "http://127.0.0.1:8000/resolve")!
+    ]
 
     private init() {}
 
@@ -24,9 +29,18 @@ actor DouyinDownloadService {
     /// 一步完成:解析并下载视频
     func parseAndDownload(_ text: String) async throws -> DouyinVideoInfo {
         log("parseAndDownload start, input length: \(text.count)")
-        let url = try extractURL(from: text)
-        log("extracted url: \(url.absoluteString)")
-        var videoInfo = try await resolveDouyinShortURL(url)
+        var videoInfo: DouyinVideoInfo
+
+        do {
+            videoInfo = try await resolveViaBackend(text: text)
+            log("resolve via backend success")
+        } catch {
+            log("resolve via backend failed: \(error.localizedDescription), fallback to local parser")
+            let url = try extractURL(from: text)
+            log("extracted url: \(url.absoluteString)")
+            videoInfo = try await resolveDouyinShortURL(url)
+        }
+
         log("resolved video id: \(videoInfo.id), download url: \(videoInfo.downloadURL.absoluteString)")
         let localURL = try await downloadVideo(from: videoInfo.downloadURL, id: videoInfo.id)
         videoInfo.localURL = localURL
@@ -106,6 +120,123 @@ actor DouyinDownloadService {
         }
 
         return try parseVideoInfo(from: htmlString)
+    }
+
+    private func resolveViaBackend(text: String) async throws -> DouyinVideoInfo {
+        struct BackendRequest: Codable {
+            let text: String
+        }
+
+        struct BackendFormat: Codable {
+            let format_id: String?
+            let ext: String?
+            let width: Int?
+            let height: Int?
+        }
+
+        struct BackendResponse: Codable {
+            let input_url: String
+            let webpage_url: String?
+            let title: String?
+            let uploader: String?
+            let duration: Double?
+            let video_id: String?
+            let download_url: String
+            let formats: [BackendFormat]?
+        }
+
+        struct BackendError: Codable {
+            let detail: String
+        }
+
+        var lastError: String = "unknown"
+
+        for backendResolveURL in backendResolveURLs {
+            do {
+                log("resolveViaBackend start: \(backendResolveURL.absoluteString)")
+                var request = URLRequest(url: backendResolveURL)
+                request.httpMethod = "POST"
+                request.timeoutInterval = 30
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONEncoder().encode(BackendRequest(text: text))
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    lastError = "invalid response"
+                    continue
+                }
+
+                log("resolveViaBackend status: \(http.statusCode), bytes: \(data.count)")
+
+                guard (200..<300).contains(http.statusCode) else {
+                    let backendError = try? JSONDecoder().decode(BackendError.self, from: data)
+                    lastError = backendError?.detail ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+                    continue
+                }
+
+                let decoded = try JSONDecoder().decode(BackendResponse.self, from: data)
+                guard let resolvedDownloadURL = normalizeBackendDownloadURL(
+                    rawDownloadURL: decoded.download_url,
+                    backendResolveURL: backendResolveURL
+                ) else {
+                    lastError = "invalid download_url"
+                    continue
+                }
+
+                let resolvedID = (decoded.video_id?.isEmpty == false ? decoded.video_id : nil)
+                    ?? extractVideoIDFromURL(decoded.webpage_url)
+                    ?? "unknown_\(Int(Date().timeIntervalSince1970))"
+
+                let info = DouyinVideoInfo(
+                    id: resolvedID,
+                    downloadURL: resolvedDownloadURL,
+                    localURL: nil,
+                    title: decoded.title,
+                    coverURL: nil
+                )
+                return info
+            } catch {
+                lastError = error.localizedDescription
+                log("resolveViaBackend request error: \(lastError)")
+            }
+        }
+
+        throw DouyinDownloadError.backendResolveFailed(reason: lastError)
+    }
+
+    private func normalizeBackendDownloadURL(rawDownloadURL: String, backendResolveURL: URL) -> URL? {
+        // 有些反向代理场景下后端会返回 localhost 下载地址,这里替换为当前 backend 域名
+        if var components = URLComponents(string: rawDownloadURL) {
+            let host = components.host?.lowercased()
+            if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+                if let backendComponents = URLComponents(url: backendResolveURL, resolvingAgainstBaseURL: false) {
+                    components.scheme = backendComponents.scheme
+                    components.host = backendComponents.host
+                    components.port = backendComponents.port
+                    return components.url
+                }
+            }
+            if components.host != nil {
+                return components.url
+            }
+        }
+
+        // 如果返回的是相对路径,拼到 backend 域名上
+        if rawDownloadURL.hasPrefix("/") {
+            return URL(string: rawDownloadURL, relativeTo: backendResolveURL.deletingLastPathComponent())?.absoluteURL
+        }
+
+        return URL(string: rawDownloadURL)
+    }
+
+    private func extractVideoIDFromURL(_ urlString: String?) -> String? {
+        guard let urlString,
+              let regex = try? NSRegularExpression(pattern: #"/video/(\d+)"#),
+              let match = regex.firstMatch(in: urlString, range: NSRange(urlString.startIndex..., in: urlString)),
+              let range = Range(match.range(at: 1), in: urlString) else {
+            return nil
+        }
+        return String(urlString[range])
     }
 
     /// 从 HTML 中解析视频信息 (使用增强的 JSON 解析)

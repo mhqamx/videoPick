@@ -38,7 +38,7 @@ def download(source: str = Query(..., description="Resolved video source URL")) 
         content, selected = registry.download(source)
         headers = {
             "X-Source-URL": selected,
-            "Content-Disposition": 'attachment; filename="douyin_video.mp4"',
+            "Content-Disposition": 'attachment; filename="video.mp4"',
         }
         return Response(content=content, media_type="video/mp4", headers=headers)
     except LocalResolveError as exc:

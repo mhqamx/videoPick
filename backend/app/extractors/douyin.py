@@ -17,10 +17,16 @@ class DouyinExtractor:
     _generic_pattern = re.compile(r"https?://[^\s]+")
 
     def extract_url(self, text: str) -> str | None:
-        for pattern in (self._short_pattern, self._long_pattern, self._generic_pattern):
+        for pattern in (self._short_pattern, self._long_pattern):
             match = pattern.search(text)
             if match:
                 return match.group(0).strip().rstrip("。.,!;，！；")
+        # 泛匹配仅在包含 douyin/iesdouyin 域名时生效
+        match = self._generic_pattern.search(text)
+        if match:
+            candidate = match.group(0).strip().rstrip("。.,!;，！；")
+            if any(d in candidate for d in ("douyin.com", "iesdouyin.com")):
+                return candidate
         return None
 
     def can_handle_source(self, source_url: str) -> bool:

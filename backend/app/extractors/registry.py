@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from .base import ResolvedVideo, VideoExtractor
 from .douyin import DouyinExtractor
+from .kuaishou import KuaishouExtractor
 from ..local_resolver import LocalResolveError
 
 
 class ExtractorRegistry:
     def __init__(self) -> None:
-        # 后续可直接在这里注册更多平台:
-        # KuaishouExtractor(), BilibiliExtractor(), TikTokExtractor() ...
-        self.extractors: list[VideoExtractor] = [DouyinExtractor()]
+        self.extractors: list[VideoExtractor] = [
+            DouyinExtractor(),
+            KuaishouExtractor(),
+        ]
 
     def resolve(self, text: str) -> ResolvedVideo:
         last_error: Exception | None = None

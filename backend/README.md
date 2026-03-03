@@ -4,9 +4,9 @@
 
 当前特点：
 - 不依赖 `yt-dlp`
-- 本地解析抖音分享页数据（`_ROUTER_DATA/_SSR_HYDRATED_DATA/RENDER_DATA`）
+- 支持抖音、快手平台视频解析
 - 提供统一 API 给 iOS 调用
-- 架构支持后续扩展到更多平台
+- Extractor 插件架构，易于扩展新平台
 
 ## API
 
@@ -43,10 +43,11 @@
 ```text
 app/
 ├── main.py                    # FastAPI 入口
-├── local_resolver.py          # 页面解析与下载候选逻辑
+├── local_resolver.py          # 抖音页面解析与下载候选逻辑
 └── extractors/
     ├── base.py                # Extractor 协议
-    ├── douyin.py              # Douyin 实现
+    ├── douyin.py              # 抖音 Extractor
+    ├── kuaishou.py            # 快手 Extractor
     └── registry.py            # 路由与注册中心
 ```
 
@@ -64,9 +65,16 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 curl http://127.0.0.1:8000/health
+
+# 抖音
 curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://v.douyin.com/A5YLrV02Hyw/"}'
+
+# 快手
+curl -X POST http://127.0.0.1:8000/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"https://v.kuaishou.com/71hf92tY 快手作品"}'
 ```
 
 ## Codespaces 部署

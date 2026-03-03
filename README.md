@@ -1,12 +1,17 @@
 # DouyinDownLoad
 
-iOS 抖音视频下载 Demo，当前采用“iOS 客户端 + Python backend 解析代理”的模式。
+iOS 短视频下载 Demo，当前采用”iOS 客户端 + Python backend 解析代理”的模式。
+
+## 支持平台
+
+- **抖音** — `v.douyin.com` 短链 / `www.douyin.com/video/` 长链
+- **快手** — `v.kuaishou.com` 短链 / `www.kuaishou.com/short-video/` 长链
 
 ## 当前状态
-- iOS 端可粘贴分享文案并下载视频
-- backend 提供 `/resolve` + `/download` 接口
+- iOS 端可粘贴分享文案并下载视频（抖音、快手）
+- backend 提供 `/resolve` + `/download` 接口，自动识别平台
 - 支持 Codespaces 公网地址对接
-- backend 已重构为可扩展 extractor 架构（后续可接多平台）
+- backend 采用可扩展 extractor 插件架构，新增平台只需后端添加 Extractor
 
 ## 项目结构
 
@@ -79,7 +84,7 @@ open DouyinDownLoad.xcodeproj
 
 ## 已知问题
 
-- 抖音链路会随时间变化，个别视频可能仍出现 403/404
+- 抖音/快手页面结构会随时间变化，个别视频可能出现 403/404
 - 不同网络环境下成功率不同
 - 如果遇到失败，请优先查看 `DouyinDownloadService` 日志
 
