@@ -177,7 +177,7 @@ class BilibiliExtractor:
                 resp = client.get(current, headers=self._http_headers(referer="https://www.bilibili.com/"))
                 if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
                     location = resp.headers["Location"]
-                    current = str(httpx.URL(location, base=current))
+                    current = str(resp.request.url.join(location))
                     video_id = self._extract_video_id_from_url(current)
                     if video_id:
                         return f"https://www.bilibili.com/video/{video_id}"
