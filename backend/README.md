@@ -4,7 +4,7 @@
 
 当前特点：
 - 不依赖 `yt-dlp`
-- 支持抖音、快手平台视频解析
+- 支持抖音、快手、小红书平台视频解析
 - 提供统一 API 给 iOS 调用
 - Extractor 插件架构，易于扩展新平台
 
@@ -48,6 +48,7 @@ app/
     ├── base.py                # Extractor 协议
     ├── douyin.py              # 抖音 Extractor
     ├── kuaishou.py            # 快手 Extractor
+    ├── xiaohongshu.py         # 小红书 Extractor
     └── registry.py            # 路由与注册中心
 ```
 
@@ -75,6 +76,11 @@ curl -X POST http://127.0.0.1:8000/resolve \
 curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://v.kuaishou.com/71hf92tY 快手作品"}'
+
+# 小红书
+curl -X POST http://127.0.0.1:8000/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"http://xhslink.com/o/2z7YRSHBEWZ 小红书笔记"}'
 ```
 
 ## Codespaces 部署

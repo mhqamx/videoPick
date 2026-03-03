@@ -3,6 +3,7 @@ from __future__ import annotations
 from .base import ResolvedVideo, VideoExtractor
 from .douyin import DouyinExtractor
 from .kuaishou import KuaishouExtractor
+from .xiaohongshu import XiaohongshuExtractor
 from ..local_resolver import LocalResolveError
 
 
@@ -11,6 +12,7 @@ class ExtractorRegistry:
         self.extractors: list[VideoExtractor] = [
             DouyinExtractor(),
             KuaishouExtractor(),
+            XiaohongshuExtractor(),
         ]
 
     def resolve(self, text: str) -> ResolvedVideo:
