@@ -4,7 +4,7 @@
 
 当前特点：
 - 不依赖 `yt-dlp`
-- 支持抖音、快手、小红书平台视频解析
+- 支持抖音、B站、快手、小红书平台视频解析
 - 提供统一 API 给 iOS 调用
 - Extractor 插件架构，易于扩展新平台
 
@@ -47,6 +47,7 @@ app/
 └── extractors/
     ├── base.py                # Extractor 协议
     ├── douyin.py              # 抖音 Extractor
+    ├── bilibili.py            # B站 Extractor
     ├── kuaishou.py            # 快手 Extractor
     ├── xiaohongshu.py         # 小红书 Extractor
     └── registry.py            # 路由与注册中心
@@ -77,17 +78,29 @@ curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://v.kuaishou.com/71hf92tY 快手作品"}'
 
+# B站
+curl -X POST http://127.0.0.1:8000/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"【那些被发型封印的颜值！！-哔哩哔哩】 https://b23.tv/hkDTFMp"}'
+
 # 小红书
 curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"http://xhslink.com/o/2z7YRSHBEWZ 小红书笔记"}'
 ```
 
+## B站当前范围说明
+
+- 支持 `b23.tv` 短链、`bilibili.com/video/BV...` 与 `.../av...`
+- 仅支持可直接下载的 progressive MP4（`durl`）
+- 若目标视频仅提供 DASH 分离流（音视频分离），当前会返回解析失败
+
 ## Codespaces 部署
 
 1. 在 Codespaces 启动服务
 2. 暴露 `8000` 端口并设置为 `Public`
 3. 使用公网地址给 iOS 配置 backend
+4. 更新代码后重启 backend 服务（避免旧进程仍在运行）
 
 ## 扩展多平台
 

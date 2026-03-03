@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .base import ResolvedVideo, VideoExtractor
+from .bilibili import BilibiliExtractor
 from .douyin import DouyinExtractor
 from .kuaishou import KuaishouExtractor
 from .xiaohongshu import XiaohongshuExtractor
@@ -11,6 +12,7 @@ class ExtractorRegistry:
     def __init__(self) -> None:
         self.extractors: list[VideoExtractor] = [
             DouyinExtractor(),
+            BilibiliExtractor(),
             KuaishouExtractor(),
             XiaohongshuExtractor(),
         ]

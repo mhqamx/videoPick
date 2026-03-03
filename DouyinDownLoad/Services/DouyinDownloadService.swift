@@ -13,7 +13,7 @@ import UIKit
 actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
     private let backendResolveURLs: [URL] = [
-        URL(string: "http://192.168.1.100:8000/resolve")!,
+//        URL(string: "http://192.168.1.100:8000/resolve")!,
         URL(string: "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve")!,
         URL(string: "http://127.0.0.1:8000/resolve")!
     ]
@@ -35,9 +35,13 @@ actor DouyinDownloadService {
             videoInfo = try await resolveViaBackend(text: text)
             log("resolve via backend success")
         } catch {
-            log("resolve via backend failed: \(error.localizedDescription), fallback to local parser")
+            let backendErrorMessage = error.localizedDescription
+            log("resolve via backend failed: \(backendErrorMessage), fallback to local parser")
             let url = try extractURL(from: text)
             log("extracted url: \(url.absoluteString)")
+            guard isDouyinURL(url) else {
+                throw DouyinDownloadError.backendResolveFailed(reason: "当前链接仅支持服务端解析，请检查 backend 服务是否可用")
+            }
             videoInfo = try await resolveDouyinShortURL(url)
         }
 
@@ -237,6 +241,13 @@ actor DouyinDownloadService {
             return nil
         }
         return String(urlString[range])
+    }
+
+    private func isDouyinURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else {
+            return false
+        }
+        return host.contains("douyin.com") || host.contains("iesdouyin.com")
     }
 
     /// 从 HTML 中解析视频信息 (使用增强的 JSON 解析)
