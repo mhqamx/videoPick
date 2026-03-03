@@ -82,6 +82,16 @@ open DouyinDownLoad.xcodeproj
 - 使用类似 `https://<name>-8000.app.github.dev` 的地址
 - 注意：某些代理环境下 backend 可能返回 `localhost` 下载地址，iOS 端已做域名归一化处理（替换为当前 backend 域名）
 
+### Codespaces 同步远端代码
+
+如果 Codespaces 拉取远端代码时遇到冲突，执行以下命令强制同步：
+
+```bash
+git merge --abort
+git fetch origin
+git reset --hard origin/main
+```
+
 ## 已知问题
 
 - 抖音/快手页面结构会随时间变化，个别视频可能出现 403/404
