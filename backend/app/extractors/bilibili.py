@@ -51,12 +51,9 @@ class BilibiliExtractor:
             raise LocalResolveError("No Bilibili URL found in input")
 
         try:
-            headers = self._http_headers(referer="https://www.bilibili.com/")
-            with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
-                resp = client.get(url)
-                resp.raise_for_status()
-                html = resp.text
-                webpage_url = str(resp.url)
+            with httpx.Client(timeout=20, follow_redirects=False) as client:
+                webpage_url = self._resolve_canonical_webpage_url(client, url)
+                html, webpage_url = self._fetch_html_with_retry(client, webpage_url)
         except LocalResolveError:
             raise
         except Exception as exc:
@@ -101,13 +98,14 @@ class BilibiliExtractor:
     def _http_headers(referer: str) -> dict[str, str]:
         return {
             "User-Agent": (
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
-                "Mobile/15E148 Safari/604.1"
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
             ),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
             "Referer": referer,
+            "Origin": "https://www.bilibili.com",
         }
 
     @staticmethod
@@ -170,3 +168,42 @@ class BilibiliExtractor:
         except Exception:
             return None
         return decoded if isinstance(decoded, dict) else None
+
+    def _resolve_canonical_webpage_url(self, client: httpx.Client, input_url: str) -> str:
+        # b23 短链常携带 story/分享参数，先解析出 BV/av 后回到标准视频页，规避 412。
+        if self._short_pattern.search(input_url):
+            current = input_url
+            for _ in range(6):
+                resp = client.get(current, headers=self._http_headers(referer="https://www.bilibili.com/"))
+                if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
+                    location = resp.headers["Location"]
+                    current = str(httpx.URL(location, base=current))
+                    video_id = self._extract_video_id_from_url(current)
+                    if video_id:
+                        return f"https://www.bilibili.com/video/{video_id}"
+                    continue
+                video_id = self._extract_video_id_from_url(str(resp.url))
+                if video_id:
+                    return f"https://www.bilibili.com/video/{video_id}"
+                break
+            raise LocalResolveError("Bilibili short URL redirect did not resolve to video page")
+
+        video_id = self._extract_video_id_from_url(input_url)
+        if video_id:
+            return f"https://www.bilibili.com/video/{video_id}"
+        return input_url
+
+    def _fetch_html_with_retry(self, client: httpx.Client, webpage_url: str) -> tuple[str, str]:
+        headers = self._http_headers(referer="https://www.bilibili.com/")
+        resp = client.get(webpage_url, headers=headers, follow_redirects=True)
+        if resp.status_code in (403, 412):
+            # 二次尝试：避免被判定为不带浏览器上下文请求。
+            alt_headers = headers | {
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+            }
+            resp = client.get(webpage_url, headers=alt_headers, follow_redirects=True)
+        resp.raise_for_status()
+        return resp.text, str(resp.url)

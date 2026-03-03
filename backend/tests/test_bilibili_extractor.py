@@ -53,6 +53,14 @@ class TestParseHelpers:
         )
         assert self.ext._extract_video_id_from_url("https://www.bilibili.com/video/av170001") == "av170001"
 
+    def test_canonicalize_long_video_url(self):
+        class DummyClient:
+            pass
+
+        url = "https://www.bilibili.com/video/BV1xx411c7mD?p=1&share_source=copy"
+        canonical = self.ext._resolve_canonical_webpage_url(DummyClient(), url)
+        assert canonical == "https://www.bilibili.com/video/BV1xx411c7mD"
+
     def test_extract_title_from_initial_state(self):
         html = """
         <script>
