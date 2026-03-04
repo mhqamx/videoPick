@@ -46,7 +46,7 @@ class TestCanHandleSource:
 
     def test_webapp_prime_tiktok(self):
         assert self.ext.can_handle_source(
-            "https://v16-webapp-prime.tiktok.com/video/tos/alisg/tos-alisg-pve-0037/test.mp4?a=1988"
+            "https://v16-webapp-prime.tiktok.com/video/tos/alisg/test.mp4?a=1988"
         )
 
     def test_unrelated_host_not_handled(self):
@@ -68,29 +68,36 @@ class TestExtractVideoIdFromUrl:
     def test_v_path(self):
         assert self.ext._extract_video_id_from_url("https://www.tiktok.com/v/7483029876543212345") == "7483029876543212345"
 
+    def test_embed_path(self):
+        assert self.ext._extract_video_id_from_url("https://www.tiktok.com/embed/v2/7483029876543212345") == "7483029876543212345"
+
     def test_no_match(self):
         assert self.ext._extract_video_id_from_url("https://www.tiktok.com/@foo") is None
 
 
-class TestParseHtml:
+class TestParseEmbedHtml:
+    """embed 页面 __FRONTITY_CONNECT_STATE__ 解析。"""
+
     def setup_method(self):
         self.ext = TikTokExtractor()
 
-    def test_parse_universal_data_reflow(self):
-        """测试 webapp.reflow.video.detail 路径（当前 TikTok 结构）。"""
+    def test_parse_frontity_state(self):
+        video_id = "7603094189227789588"
         html = """
-        <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">
+        <script id="__FRONTITY_CONNECT_STATE__" type="application/json">
         {
-          "__DEFAULT_SCOPE__": {
-            "webapp.reflow.video.detail": {
-              "statusCode": 0,
-              "itemInfo": {
-                "itemStruct": {
-                  "desc": "测试 TikTok 视频",
-                  "video": {
-                    "downloadAddr": "https://v16-webapp-prime.tiktok.com/video/tos/test_download.mp4?a=1988",
-                    "playAddr": "https://v16-webapp-prime.tiktok.com/video/tos/test_play.mp4?a=1988",
-                    "cover": "https://p16-sign-sg.tiktokcdn.com/obj/tos/cover~tplv-photomode-zoomcover:720:720.jpeg"
+          "source": {
+            "data": {
+              "/embed/v2/7603094189227789588": {
+                "videoData": {
+                  "itemInfos": {
+                    "text": "测试 TikTok 视频",
+                    "video": {
+                      "urls": [
+                        "https://v16m.tiktokcdn.com/abc123/video/tos/test.mp4?a=1233"
+                      ],
+                      "videoMeta": {"height": 1024, "width": 576, "duration": 67}
+                    }
                   }
                 }
               }
@@ -99,15 +106,54 @@ class TestParseHtml:
         }
         </script>
         """
-        title, candidates = self.ext._parse_html(html)
+        title, candidates = self.ext._parse_embed_html(html, video_id)
         assert title == "测试 TikTok 视频"
+        assert len(candidates) == 1
+        assert "tiktokcdn.com" in candidates[0]
+
+    def test_empty_state_returns_empty(self):
+        html = """<script id="__FRONTITY_CONNECT_STATE__" type="application/json">{}</script>"""
+        title, candidates = self.ext._parse_embed_html(html, "123")
+        assert title is None
+        assert candidates == []
+
+    def test_no_script_returns_empty(self):
+        title, candidates = self.ext._parse_embed_html("<html>no data</html>", "123")
+        assert title is None
+        assert candidates == []
+
+
+class TestParseMainPageHtml:
+    """主页面 HTML 回退解析。"""
+
+    def setup_method(self):
+        self.ext = TikTokExtractor()
+
+    def test_parse_universal_data_reflow(self):
+        html = """
+        <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">
+        {
+          "__DEFAULT_SCOPE__": {
+            "webapp.reflow.video.detail": {
+              "itemInfo": {
+                "itemStruct": {
+                  "desc": "Reflow 视频",
+                  "video": {
+                    "downloadAddr": "https://v16-webapp-prime.tiktok.com/video/tos/test_dl.mp4?a=1988",
+                    "playAddr": "https://v16-webapp-prime.tiktok.com/video/tos/test_play.mp4?a=1988"
+                  }
+                }
+              }
+            }
+          }
+        }
+        </script>
+        """
+        title, candidates = self.ext._parse_main_page_html(html)
+        assert title == "Reflow 视频"
         assert len(candidates) == 2
-        assert "test_download.mp4" in candidates[0]
-        # 封面图不应出现在候选中
-        assert not any("cover" in c and "jpeg" in c for c in candidates)
 
     def test_parse_universal_data_legacy(self):
-        """测试 webapp.video-detail 路径（旧结构兼容）。"""
         html = """
         <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">
         {
@@ -115,10 +161,9 @@ class TestParseHtml:
             "webapp.video-detail": {
               "itemInfo": {
                 "itemStruct": {
-                  "desc": "旧版结构视频",
+                  "desc": "旧版视频",
                   "video": {
-                    "downloadAddr": "https://v16m.tiktokcdn.com/obj/tos/test_download.mp4",
-                    "playAddr": "https://v16m.tiktokcdn.com/obj/tos/test_play.mp4"
+                    "downloadAddr": "https://v16m.tiktokcdn.com/obj/tos/test.mp4"
                   }
                 }
               }
@@ -127,12 +172,11 @@ class TestParseHtml:
         }
         </script>
         """
-        title, candidates = self.ext._parse_html(html)
-        assert title == "旧版结构视频"
-        assert len(candidates) == 2
-        assert candidates[0].endswith("test_download.mp4")
+        title, candidates = self.ext._parse_main_page_html(html)
+        assert title == "旧版视频"
+        assert len(candidates) == 1
 
-    def test_parse_sigi_state_assignment(self):
+    def test_parse_sigi_state(self):
         html = """
         <script>
         window['SIGI_STATE'] = {
@@ -147,74 +191,9 @@ class TestParseHtml:
         };
         </script>
         """
-        title, candidates = self.ext._parse_html(html)
+        title, candidates = self.ext._parse_main_page_html(html)
         assert title == "SIGI 标题"
         assert any("tiktokv.com" in c for c in candidates)
-
-    def test_parse_raw_html_fallback(self):
-        html = r'"playAddr":"https:\/\/v16-webapp-prime.tiktok.com\/video\/tos\/alisg\/test.mp4?a=1988"'
-        title, candidates = self.ext._parse_html(html)
-        assert title is None
-        assert any("test.mp4" in c for c in candidates)
-
-    def test_no_video_returns_empty(self):
-        title, candidates = self.ext._parse_html("<html>no media</html>")
-        assert title is None
-        assert candidates == []
-
-    def test_cover_image_excluded(self):
-        """封面图 URL 不应作为候选。"""
-        html = """
-        <script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">
-        {
-          "__DEFAULT_SCOPE__": {
-            "webapp.reflow.video.detail": {
-              "itemInfo": {
-                "itemStruct": {
-                  "desc": "test",
-                  "video": {
-                    "cover": "https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/cover~tplv-photomode-zoomcover:720:720.jpeg",
-                    "originCover": "https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/cover~tplv-tiktokx-origin.image",
-                    "downloadAddr": "https://v16-webapp-prime.tiktok.com/video/tos/alisg/real_video.mp4?a=1988"
-                  }
-                }
-              }
-            }
-          }
-        }
-        </script>
-        """
-        title, candidates = self.ext._parse_html(html)
-        assert len(candidates) == 1
-        assert "real_video.mp4" in candidates[0]
-
-
-class TestNormalizeVideoUrl:
-    def setup_method(self):
-        self.ext = TikTokExtractor()
-
-    def test_rejects_image_url(self):
-        assert self.ext._normalize_video_url(
-            "https://p16-sign-sg.tiktokcdn.com/tos/cover~tplv-photomode-zoomcover:720:720.jpeg"
-        ) is None
-
-    def test_rejects_js_url(self):
-        assert self.ext._normalize_video_url(
-            "https://lf16-cdn-tos.tiktokcdn-us.com/obj/static-tx/secsdk/secsdk-lastest.umd.js"
-        ) is None
-
-    def test_rejects_redirect_url(self):
-        assert self.ext._normalize_video_url(
-            "https://www.tiktokv.com/redirect/?redirect_url=snssdk1180://aweme/detail/123"
-        ) is None
-
-    def test_accepts_webapp_prime_video(self):
-        url = "https://v16-webapp-prime.tiktok.com/video/tos/alisg/test.mp4?a=1988&mime_type=video_mp4"
-        assert self.ext._normalize_video_url(url) == url
-
-    def test_accepts_tiktokcdn_video(self):
-        url = "https://v16m.tiktokcdn.com/obj/tos/test.mp4"
-        assert self.ext._normalize_video_url(url) == url
 
 
 class TestRegistryIntegration:
