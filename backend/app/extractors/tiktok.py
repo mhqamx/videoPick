@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import html as html_lib
 import json
+import logging
 import re
 import time
 from urllib.parse import urlparse
 
 from .base import BaseExtractor, ResolvedVideo, resolve_client
 from ..local_resolver import LocalResolveError
+
+logger = logging.getLogger(__name__)
 
 
 class TikTokExtractor(BaseExtractor):
@@ -19,8 +22,17 @@ class TikTokExtractor(BaseExtractor):
         "byteoversea.com",
         "ibytedtos.com",
         "muscdn.com",
+        "tiktok.com",
     )
     _default_referer = "https://www.tiktok.com/"
+
+    # 图片/非视频 URL 排除模式
+    _IMAGE_EXTS = (".jpeg", ".jpg", ".png", ".gif", ".webp", ".svg", ".image")
+    _NON_VIDEO_PATH_KEYWORDS = (
+        "tplv-", "photomode", "zoomcover", "origin.image",
+        "placeholder", "avatar", "static-tx", "secsdk",
+        "obj/eden", "obj/static",
+    )
 
     _short_pattern = re.compile(r"https?://(?:vm|vt)\.tiktok\.com/[a-zA-Z0-9]+/?", re.I)
     _share_pattern = re.compile(r"https?://(?:www\.)?tiktok\.com/t/[a-zA-Z0-9]+/?", re.I)
@@ -50,7 +62,10 @@ class TikTokExtractor(BaseExtractor):
             host = (urlparse(source_url).hostname or "").lower()
         except Exception:
             return False
-        return any(host == d or host.endswith("." + d) or host.endswith("-" + d) for d in self._CDN_HOSTS)
+        return any(
+            host == d or host.endswith("." + d) or host.endswith("-" + d)
+            for d in self._CDN_HOSTS
+        )
 
     def resolve(self, text: str) -> ResolvedVideo:
         url = self.extract_url(text)
@@ -95,8 +110,8 @@ class TikTokExtractor(BaseExtractor):
         return m.group(1) if m else None
 
     def _parse_html(self, html: str) -> tuple[str | None, list[str]]:
-        # 策略 1: __UNIVERSAL_DATA_FOR_REHYDRATION__
-        title, candidates = self._parse_json_script(html, "__UNIVERSAL_DATA_FOR_REHYDRATION__")
+        # 策略 1: __UNIVERSAL_DATA_FOR_REHYDRATION__ — 精确提取 video 节点
+        title, candidates = self._parse_universal_data(html)
         if candidates:
             return title, candidates
 
@@ -113,6 +128,53 @@ class TikTokExtractor(BaseExtractor):
         # 策略 4: 原始 HTML 正则兜底
         candidates4 = self._parse_raw_html(html)
         return title3 or title2 or title, candidates4
+
+    def _parse_universal_data(self, html: str) -> tuple[str | None, list[str]]:
+        """精确提取 __UNIVERSAL_DATA_FOR_REHYDRATION__ 中的视频地址。"""
+        root = self._extract_json_by_script_id(html, "__UNIVERSAL_DATA_FOR_REHYDRATION__")
+        if not isinstance(root, dict):
+            return None, []
+
+        scope = root.get("__DEFAULT_SCOPE__", {})
+        # TikTok 页面可能用不同的 scope key
+        video_detail = (
+            scope.get("webapp.reflow.video.detail")
+            or scope.get("webapp.video-detail")
+            or {}
+        )
+        item_struct = (
+            video_detail.get("itemInfo", {}).get("itemStruct")
+            or video_detail.get("itemStruct")
+            or {}
+        )
+
+        title = item_struct.get("desc") or item_struct.get("title") or None
+        video_obj = item_struct.get("video", {})
+
+        candidates: list[str] = []
+        # 优先 downloadAddr，其次 playAddr
+        for key in ("downloadAddr", "playAddr"):
+            val = video_obj.get(key)
+            if isinstance(val, str):
+                normalized = self._normalize_video_url(val)
+                if normalized:
+                    candidates.append(normalized)
+            elif isinstance(val, list):
+                for v in val:
+                    if isinstance(v, str):
+                        normalized = self._normalize_video_url(v)
+                        if normalized:
+                            candidates.append(normalized)
+
+        # bitrateInfo 中可能有更多地址
+        for br in video_obj.get("bitrateInfo", []):
+            play_addr = br.get("PlayAddr", {})
+            for u in play_addr.get("UrlList", []):
+                normalized = self._normalize_video_url(u)
+                if normalized:
+                    candidates.append(normalized)
+
+        return title, list(dict.fromkeys(candidates))
 
     def _parse_json_script(self, html: str, script_id: str) -> tuple[str | None, list[str]]:
         root = self._extract_json_by_script_id(html, script_id)
@@ -166,8 +228,8 @@ class TikTokExtractor(BaseExtractor):
                 for k, v in node.items():
                     if k in ("desc", "title", "seoTitle") and isinstance(v, str) and v.strip() and not title:
                         title = v.strip()
-                    elif isinstance(v, str) and self._is_video_url_key(k):
-                        normalized = self._normalize_candidate(v)
+                    elif isinstance(v, str) and k in ("downloadAddr", "playAddr", "playApi"):
+                        normalized = self._normalize_video_url(v)
                         if normalized:
                             candidates.append(normalized)
                     else:
@@ -179,17 +241,8 @@ class TikTokExtractor(BaseExtractor):
         walk(root)
         return title, list(dict.fromkeys(candidates))
 
-    @staticmethod
-    def _is_video_url_key(key: str) -> bool:
-        return key in {
-            "downloadAddr",
-            "playAddr",
-            "playApi",
-            "url",
-            "src",
-        }
-
-    def _normalize_candidate(self, value: str) -> str | None:
+    def _normalize_video_url(self, value: str) -> str | None:
+        """标准化并验证是视频 URL（排除图片、JS、redirect 等）。"""
         if not value or not isinstance(value, str):
             return None
         url = value.strip()
@@ -205,30 +258,39 @@ class TikTokExtractor(BaseExtractor):
         )
         url = html_lib.unescape(url)
 
-        try:
-            host = (urlparse(url).hostname or "").lower()
-        except Exception:
+        # 排除图片
+        parsed = urlparse(url)
+        path_lower = parsed.path.lower()
+        if any(path_lower.endswith(ext) for ext in self._IMAGE_EXTS):
             return None
+        # 排除已知的非视频路径
+        url_lower = url.lower()
+        if any(kw in url_lower for kw in self._NON_VIDEO_PATH_KEYWORDS):
+            return None
+        # 排除 redirect URL
+        if "/redirect/" in url_lower:
+            return None
+        # 排除纯 JS/CSS
+        if path_lower.endswith((".js", ".css")):
+            return None
+
+        host = (parsed.hostname or "").lower()
         if not host:
             return None
 
         if any(host == d or host.endswith("." + d) or host.endswith("-" + d) for d in self._CDN_HOSTS):
             return url
-        if url.endswith(".mp4") and ("tiktok" in host or "byte" in host):
-            return url
         return None
 
     def _parse_raw_html(self, html: str) -> list[str]:
         patterns = [
-            r'(https?:\\/\\/[^"\']+(?:tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com)[^"\']*)',
-            r'(https?://[^"\']+(?:tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com)[^"\']*)',
-            r'(https?:\\/\\/[^"\']+\.mp4[^"\']*)',
-            r'(https?://[^"\']+\.mp4[^"\']*)',
+            r'(https?:\\/\\/[^"\']+(?:tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|webapp-prime\.tiktok\.com)[^"\']*)',
+            r'(https?://[^"\']+(?:tiktokcdn(?:-us)?\.com|tiktokv\.com|byteoversea\.com|ibytedtos\.com|muscdn\.com|webapp-prime\.tiktok\.com)[^"\']*)',
         ]
         candidates: list[str] = []
         for p in patterns:
             for m in re.finditer(p, html, re.I):
-                normalized = self._normalize_candidate(m.group(1))
+                normalized = self._normalize_video_url(m.group(1))
                 if normalized:
                     candidates.append(normalized)
         return list(dict.fromkeys(candidates))
