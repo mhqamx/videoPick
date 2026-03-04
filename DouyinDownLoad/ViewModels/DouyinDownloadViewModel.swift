@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import UIKit
 
 @MainActor
 class DouyinDownloadViewModel: ObservableObject {
@@ -19,23 +20,33 @@ class DouyinDownloadViewModel: ObservableObject {
     @Published var videoInfo: DouyinVideoInfo?
     @Published var saveResult: String?
     @Published var showPreview: Bool = false
+    @Published var downloadProgress: Double?
 
     // MARK: - 私有属性
 
     private let service = DouyinDownloadService.shared
+    private var downloadTask: Task<Void, Never>?
 
     // MARK: - 公共方法
 
     /// 处理输入并下载视频
     func processInput() {
         guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "请输入抖音链接"
+            errorMessage = "请输入分享链接"
             return
         }
 
-        Task {
+        downloadTask = Task {
             await downloadVideo()
         }
+    }
+
+    /// 取消下载
+    func cancelDownload() {
+        downloadTask?.cancel()
+        downloadTask = nil
+        isLoading = false
+        downloadProgress = nil
     }
 
     /// 下载视频
@@ -45,11 +56,18 @@ class DouyinDownloadViewModel: ObservableObject {
         saveResult = nil
         videoInfo = nil
         showPreview = false
+        downloadProgress = nil
 
         do {
-            let info = try await service.parseAndDownload(inputText)
+            let info = try await service.parseAndDownload(inputText) { [weak self] p in
+                Task { @MainActor in
+                    self?.downloadProgress = p
+                }
+            }
             videoInfo = info
             showPreview = true
+        } catch is CancellationError {
+            // 用户主动取消，不显示错误
         } catch let error as DouyinDownloadError {
             errorMessage = error.errorDescription
         } catch let urlError as URLError {
@@ -59,10 +77,11 @@ class DouyinDownloadViewModel: ObservableObject {
         }
 
         isLoading = false
+        downloadProgress = nil
     }
 
-    /// 保存到相册
-    func saveToAlbum() async {
+    /// 保存视频（iOS 保存到相册，macOS 保存到下载目录）
+    func saveVideo() async {
         guard let localURL = videoInfo?.localURL else {
             errorMessage = "没有可保存的视频"
             return
@@ -73,8 +92,22 @@ class DouyinDownloadViewModel: ObservableObject {
         saveResult = nil
 
         do {
-            try await service.saveToAlbum(videoURL: localURL)
+            let savedURL = try await service.saveVideo(videoURL: localURL)
+            #if targetEnvironment(macCatalyst)
+            if let url = savedURL {
+                saveResult = "视频已保存到: \(url.lastPathComponent)"
+            } else {
+                saveResult = "视频已保存"
+            }
+            #elseif os(iOS)
             saveResult = "视频已保存到相册"
+            #else
+            if let url = savedURL {
+                saveResult = "视频已保存到: \(url.lastPathComponent)"
+            } else {
+                saveResult = "视频已保存"
+            }
+            #endif
         } catch let error as DouyinDownloadError {
             errorMessage = error.errorDescription
         } catch {
@@ -84,7 +117,7 @@ class DouyinDownloadViewModel: ObservableObject {
         isLoading = false
     }
 
-    /// 从剪贴板粘贴
+    /// 从剪贴板粘贴（Mac Catalyst 下 UIPasteboard 自动桥接 macOS 剪贴板）
     func pasteFromClipboard() {
         if let clipboardString = UIPasteboard.general.string {
             inputText = clipboardString
@@ -108,7 +141,7 @@ class DouyinDownloadViewModel: ObservableObject {
     private func networkErrorDescription(_ error: URLError) -> String {
         switch error.code {
         case .cannotFindHost, .dnsLookupFailed:
-            return "网络错误: 无法解析抖音域名，请检查网络或 DNS"
+            return "网络错误: 无法解析域名，请检查网络或 DNS"
         case .notConnectedToInternet:
             return "网络错误: 当前设备未连接互联网"
         case .timedOut:

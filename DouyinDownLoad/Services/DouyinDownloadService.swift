@@ -6,16 +6,24 @@
 //
 
 import Foundation
+
+#if canImport(Photos)
 import Photos
+#endif
+
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// 抖音视频下载服务 (线程安全)
 actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
     private let backendResolveURLs: [URL] = [
-//        URL(string: "http://192.168.1.100:8000/resolve")!,
+        URL(string: "http://192.168.1.100:8000/resolve")!,
         URL(string: "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve")!,
-        URL(string: "http://127.0.0.1:8000/resolve")!
+//        URL(string: "http://127.0.0.1:8000/resolve")!
     ]
 
     private init() {}
@@ -27,7 +35,7 @@ actor DouyinDownloadService {
     // MARK: - 公共 API
 
     /// 一步完成:解析并下载视频
-    func parseAndDownload(_ text: String) async throws -> DouyinVideoInfo {
+    func parseAndDownload(_ text: String, progress: @Sendable (Double) -> Void = { _ in }) async throws -> DouyinVideoInfo {
         log("parseAndDownload start, input length: \(text.count)")
         var videoInfo: DouyinVideoInfo
 
@@ -46,14 +54,26 @@ actor DouyinDownloadService {
         }
 
         log("resolved video id: \(videoInfo.id), download url: \(videoInfo.downloadURL.absoluteString)")
-        let localURL = try await downloadVideo(from: videoInfo.downloadURL, id: videoInfo.id)
+        let localURL = try await downloadVideo(from: videoInfo.downloadURL, id: videoInfo.id, progress: progress)
         videoInfo.localURL = localURL
         log("parseAndDownload success, local file: \(localURL.path)")
         return videoInfo
     }
 
-    /// 保存视频到相册
-    func saveToAlbum(videoURL: URL) async throws {
+    /// 保存视频到相册 (iOS) 或下载目录 (macOS/Mac Catalyst)
+    func saveVideo(videoURL: URL) async throws -> URL? {
+        #if targetEnvironment(macCatalyst)
+        return try saveToDownloads(videoURL: videoURL)
+        #elseif os(iOS)
+        try await saveToAlbum(videoURL: videoURL)
+        return nil
+        #else
+        return try saveToDownloads(videoURL: videoURL)
+        #endif
+    }
+
+    #if !targetEnvironment(macCatalyst)
+    private func saveToAlbum(videoURL: URL) async throws {
         log("saveToAlbum start: \(videoURL.path)")
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         log("photo permission status: \(status.rawValue)")
@@ -71,10 +91,25 @@ actor DouyinDownloadService {
                 } else {
                     let errorMsg = error?.localizedDescription ?? "未知错误"
                     self.log("saveToAlbum failed: \(errorMsg)")
-                    continuation.resume(throwing: DouyinDownloadError.saveToAlbumFailed(reason: errorMsg))
+                    continuation.resume(throwing: DouyinDownloadError.saveFailed(reason: errorMsg))
                 }
             }
         }
+    }
+    #endif
+
+    private func saveToDownloads(videoURL: URL) throws -> URL {
+        log("saveToDownloads start: \(videoURL.path)")
+        guard let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+            throw DouyinDownloadError.saveFailed(reason: "无法访问下载目录")
+        }
+        let destURL = downloadsDir.appendingPathComponent(videoURL.lastPathComponent)
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try FileManager.default.removeItem(at: destURL)
+        }
+        try FileManager.default.copyItem(at: videoURL, to: destURL)
+        log("saveToDownloads success: \(destURL.path)")
+        return destURL
     }
 
     // MARK: - 内部方法
@@ -422,17 +457,18 @@ actor DouyinDownloadService {
         return url
     }
 
-    private func findFirstDictionary(containing key: String, in value: Any) -> [String: Any]? {
+    private func findFirstDictionary(containing key: String, in value: Any, maxDepth: Int = 15) -> [String: Any]? {
+        guard maxDepth > 0 else { return nil }
         if let dict = value as? [String: Any] {
             if dict[key] != nil { return dict }
             for child in dict.values {
-                if let found = findFirstDictionary(containing: key, in: child) {
+                if let found = findFirstDictionary(containing: key, in: child, maxDepth: maxDepth - 1) {
                     return found
                 }
             }
         } else if let array = value as? [Any] {
             for child in array {
-                if let found = findFirstDictionary(containing: key, in: child) {
+                if let found = findFirstDictionary(containing: key, in: child, maxDepth: maxDepth - 1) {
                     return found
                 }
             }
@@ -440,17 +476,18 @@ actor DouyinDownloadService {
         return nil
     }
 
-    private func findFirstString(forKey targetKey: String, in value: Any) -> String? {
+    private func findFirstString(forKey targetKey: String, in value: Any, maxDepth: Int = 15) -> String? {
+        guard maxDepth > 0 else { return nil }
         if let dict = value as? [String: Any] {
             if let v = dict[targetKey] as? String { return v }
             for child in dict.values {
-                if let found = findFirstString(forKey: targetKey, in: child) {
+                if let found = findFirstString(forKey: targetKey, in: child, maxDepth: maxDepth - 1) {
                     return found
                 }
             }
         } else if let array = value as? [Any] {
             for child in array {
-                if let found = findFirstString(forKey: targetKey, in: child) {
+                if let found = findFirstString(forKey: targetKey, in: child, maxDepth: maxDepth - 1) {
                     return found
                 }
             }
@@ -470,7 +507,8 @@ actor DouyinDownloadService {
         return nil
     }
 
-    private func collectVideoURLCandidates(from value: Any, into candidates: inout [String]) {
+    private func collectVideoURLCandidates(from value: Any, into candidates: inout [String], maxDepth: Int = 15) {
+        guard maxDepth > 0 else { return }
         if let dict = value as? [String: Any] {
             for (key, child) in dict {
                 if key == "url_list", let arr = child as? [String] {
@@ -480,19 +518,19 @@ actor DouyinDownloadService {
                           (str.contains("play") || str.contains("video") || str.contains(".mp4")) {
                     candidates.append(str)
                 } else {
-                    collectVideoURLCandidates(from: child, into: &candidates)
+                    collectVideoURLCandidates(from: child, into: &candidates, maxDepth: maxDepth - 1)
                 }
             }
         } else if let array = value as? [Any] {
             for child in array {
-                collectVideoURLCandidates(from: child, into: &candidates)
+                collectVideoURLCandidates(from: child, into: &candidates, maxDepth: maxDepth - 1)
             }
         }
     }
 
 
-    /// 下载视频
-    func downloadVideo(from url: URL, id: String) async throws -> URL {
+    /// 下载视频（流式写入，支持进度回调）
+    func downloadVideo(from url: URL, id: String, progress: @Sendable (Double) -> Void = { _ in }) async throws -> URL {
         let candidates = candidateDownloadURLs(from: url)
         log("downloadVideo start, id: \(id), candidates: \(candidates.map(\.absoluteString))")
 
@@ -507,22 +545,64 @@ actor DouyinDownloadService {
             request.addValue("https://www.douyin.com/", forHTTPHeaderField: "Referer")
 
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
                     log("download attempt[\(index)] invalid response")
                     continue
                 }
 
                 lastStatusCode = httpResponse.statusCode
-                log("download attempt[\(index)] status: \(httpResponse.statusCode), bytes: \(data.count), url: \(candidate.absoluteString)")
+                log("download attempt[\(index)] status: \(httpResponse.statusCode), expectedLength: \(httpResponse.expectedContentLength), url: \(candidate.absoluteString)")
 
-                if (200..<300).contains(httpResponse.statusCode), !data.isEmpty {
-                    let fileName = "douyin_\(id).mp4"
-                    let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-                    try data.write(to: fileURL)
-                    log("downloadVideo success, file written: \(fileURL.path)")
-                    return fileURL
+                guard (200..<300).contains(httpResponse.statusCode) else {
+                    continue
                 }
+
+                let fileName = "douyin_\(id).mp4"
+                let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    try FileManager.default.removeItem(at: fileURL)
+                }
+                FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+                let fileHandle = try FileHandle(forWritingTo: fileURL)
+                defer { try? fileHandle.close() }
+
+                let totalBytes = httpResponse.expectedContentLength
+                var receivedBytes: Int64 = 0
+                let bufferSize = 65_536 // 64 KB
+                var buffer = Data(capacity: bufferSize)
+
+                for try await byte in asyncBytes {
+                    try Task.checkCancellation()
+                    buffer.append(byte)
+                    if buffer.count >= bufferSize {
+                        fileHandle.write(buffer)
+                        receivedBytes += Int64(buffer.count)
+                        buffer.removeAll(keepingCapacity: true)
+                        if totalBytes > 0 {
+                            progress(Double(receivedBytes) / Double(totalBytes))
+                        }
+                    }
+                }
+
+                // 写入剩余 buffer
+                if !buffer.isEmpty {
+                    fileHandle.write(buffer)
+                    receivedBytes += Int64(buffer.count)
+                }
+
+                if totalBytes > 0 {
+                    progress(1.0)
+                }
+
+                guard receivedBytes > 0 else { continue }
+
+                log("downloadVideo success, file written: \(fileURL.path), bytes: \(receivedBytes)")
+                return fileURL
+            } catch is CancellationError {
+                log("download cancelled by user")
+                throw CancellationError()
             } catch {
                 log("download attempt[\(index)] error: \(error.localizedDescription)")
             }

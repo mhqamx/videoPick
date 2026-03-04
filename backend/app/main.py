@@ -1,10 +1,46 @@
+from contextlib import asynccontextmanager
+from urllib.parse import urlparse
+
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 from .models import ResolveRequest, ResolveResponse
 from .local_resolver import LocalResolveError, build_proxy_download_url
 from .extractors.registry import ExtractorRegistry
+from .extractors.base import close_shared_clients
 
-app = FastAPI(title="Douyin Resolver API", version="0.1.0")
+# ---------------------------------------------------------------------------
+# SSRF 防护：仅允许已知视频 CDN 域名
+# ---------------------------------------------------------------------------
+
+_ALLOWED_CDN_HOSTS = (
+    "douyin.com", "iesdouyin.com", "douyinpic.com", "douyinvod.com",
+    "tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokv.com",
+    "byteoversea.com", "ibytedtos.com", "muscdn.com",
+    "bilibili.com", "bilivideo.com", "bilivideo.cn", "hdslb.com",
+    "kwimgs.com", "kwai.net", "kuaishou.com",
+    "xiaohongshu.com", "xhscdn.com", "xhscdn.net", "xhslink.com",
+)
+
+
+def _is_allowed_source(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(host == d or host.endswith("." + d) for d in _ALLOWED_CDN_HOSTS)
+
+
+# ---------------------------------------------------------------------------
+# App lifecycle
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    close_shared_clients()
+
+
+app = FastAPI(title="Douyin Resolver API", version="0.1.0", lifespan=lifespan)
 registry = ExtractorRegistry()
 
 
@@ -34,6 +70,8 @@ def resolve(req: ResolveRequest, request: Request) -> ResolveResponse:
 
 @app.get("/download")
 def download(source: str = Query(..., description="Resolved video source URL")) -> Response:
+    if not _is_allowed_source(source):
+        raise HTTPException(status_code=400, detail="Source URL not in allowed CDN hosts")
     try:
         content, selected = registry.download(source)
         headers = {

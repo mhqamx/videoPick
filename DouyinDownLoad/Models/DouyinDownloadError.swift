@@ -15,13 +15,14 @@ enum DouyinDownloadError: LocalizedError {
     case downloadFailed(statusCode: Int)
     case noVideoLinkFound
     case invalidVideoLink
-    case saveToAlbumFailed(reason: String)
+    case backendResolveFailed(reason: String)
+    case saveFailed(reason: String)
     case noPermission
 
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "未找到有效的抖音链接"
+            return "未找到有效的分享链接"
         case .urlResolutionFailed:
             return "链接解析失败"
         case .videoDataNotFound:
@@ -32,8 +33,10 @@ enum DouyinDownloadError: LocalizedError {
             return "未找到视频下载链接"
         case .invalidVideoLink:
             return "无效的视频链接"
-        case .saveToAlbumFailed(let reason):
-            return "保存到相册失败: \(reason)"
+        case .backendResolveFailed(let reason):
+            return "服务端解析失败: \(reason)"
+        case .saveFailed(let reason):
+            return "保存失败: \(reason)"
         case .noPermission:
             return "需要相册访问权限"
         }

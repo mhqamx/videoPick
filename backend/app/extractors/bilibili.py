@@ -8,12 +8,21 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .base import ResolvedVideo
+from .base import BaseExtractor, ResolvedVideo, download_client, resolve_client
 from ..local_resolver import LocalResolveError
 
+# B站需要桌面端 UA，不能用移动端 UA
+_DESKTOP_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
-class BilibiliExtractor:
+
+class BilibiliExtractor(BaseExtractor):
     platform = "bilibili"
+    _CDN_HOSTS = ()  # B站 CDN 域名多变，使用自定义 can_handle_source
+    _default_referer = "https://www.bilibili.com/"
 
     _short_pattern = re.compile(r"https?://b23\.tv/[a-zA-Z0-9]+/?", re.I)
     _long_pattern = re.compile(
@@ -56,6 +65,7 @@ class BilibiliExtractor:
         candidates: list[str] = []
 
         try:
+            # B站短链解析需要禁用 follow_redirects，使用独立 client
             with httpx.Client(timeout=20, follow_redirects=False) as client:
                 webpage_url = self._resolve_canonical_webpage_url(client, url)
                 video_id = self._extract_video_id_from_url(webpage_url) or f"bili_unknown_{int(time.time())}"
@@ -97,15 +107,15 @@ class BilibiliExtractor:
         )
 
     def download_bytes(self, source_url: str) -> tuple[bytes, str]:
-        headers = self._http_headers(referer="https://www.bilibili.com/") | {
+        """B站需要桌面端 UA + Referer，覆盖基类实现。"""
+        headers = self._bili_headers(referer="https://www.bilibili.com/") | {
             "Accept": "*/*",
             "Range": "bytes=0-",
         }
         try:
-            with httpx.Client(timeout=60, follow_redirects=True, headers=headers) as client:
-                resp = client.get(source_url)
-                if 200 <= resp.status_code < 300 and resp.content:
-                    return resp.content, source_url
+            resp = download_client.get(source_url, headers=headers)
+            if 200 <= resp.status_code < 300 and resp.content:
+                return resp.content, source_url
             raise LocalResolveError(
                 f"Bilibili download failed: status={resp.status_code}"
             )
@@ -114,14 +124,14 @@ class BilibiliExtractor:
         except Exception as exc:
             raise LocalResolveError(f"Bilibili download failed: {exc}") from exc
 
+    # ------------------------------------------------------------------
+    # 内部方法
+    # ------------------------------------------------------------------
+
     @staticmethod
-    def _http_headers(referer: str) -> dict[str, str]:
+    def _bili_headers(referer: str) -> dict[str, str]:
         return {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": _DESKTOP_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
             "Referer": referer,
@@ -131,11 +141,7 @@ class BilibiliExtractor:
     @staticmethod
     def _api_headers(referer: str) -> dict[str, str]:
         return {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": _DESKTOP_USER_AGENT,
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "zh-CN,zh-Hans;q=0.9",
             "Referer": referer,
@@ -213,11 +219,10 @@ class BilibiliExtractor:
         return decoded if isinstance(decoded, dict) else None
 
     def _resolve_canonical_webpage_url(self, client: httpx.Client, input_url: str) -> str:
-        # b23 短链常携带 story/分享参数，先解析出 BV/av 后回到标准视频页，规避 412。
         if self._short_pattern.search(input_url):
             current = input_url
             for _ in range(6):
-                resp = client.get(current, headers=self._http_headers(referer="https://www.bilibili.com/"))
+                resp = client.get(current, headers=self._bili_headers(referer="https://www.bilibili.com/"))
                 if 300 <= resp.status_code < 400 and resp.headers.get("Location"):
                     location = resp.headers["Location"]
                     current = str(resp.request.url.join(location))
@@ -237,10 +242,9 @@ class BilibiliExtractor:
         return input_url
 
     def _fetch_html_with_retry(self, client: httpx.Client, webpage_url: str) -> tuple[str, str]:
-        headers = self._http_headers(referer="https://www.bilibili.com/")
+        headers = self._bili_headers(referer="https://www.bilibili.com/")
         resp = client.get(webpage_url, headers=headers, follow_redirects=True)
         if resp.status_code in (403, 412):
-            # 二次尝试：避免被判定为不带浏览器上下文请求。
             alt_headers = headers | {
                 "Upgrade-Insecure-Requests": "1",
                 "Sec-Fetch-Dest": "document",

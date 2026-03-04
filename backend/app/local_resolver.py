@@ -164,7 +164,7 @@ def resolve_video(url: str) -> LocalResolvedVideo:
         try:
             root = json.loads(json_payload)
             title, video_id, candidates = _parse_from_json(root)
-        except Exception:
+        except (json.JSONDecodeError, ValueError, KeyError):
             candidates = []
 
     if not candidates:
@@ -200,7 +200,7 @@ def download_video_bytes(source: str) -> tuple[bytes, str]:
                 if 200 <= resp.status_code < 300 and resp.content:
                     return resp.content, candidate
                 last_error = f"status={resp.status_code}"
-            except Exception as exc:
+            except httpx.HTTPError as exc:
                 last_error = str(exc)
                 continue
     raise LocalResolveError(last_error)

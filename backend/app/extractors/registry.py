@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import json
+import logging
+
+import httpx
+
 from .base import ResolvedVideo, VideoExtractor
 from .bilibili import BilibiliExtractor
 from .douyin import DouyinExtractor
 from .kuaishou import KuaishouExtractor
+from .tiktok import TikTokExtractor
 from .xiaohongshu import XiaohongshuExtractor
 from ..local_resolver import LocalResolveError
+
+logger = logging.getLogger(__name__)
 
 
 class ExtractorRegistry:
     def __init__(self) -> None:
         self.extractors: list[VideoExtractor] = [
             DouyinExtractor(),
+            TikTokExtractor(),
             BilibiliExtractor(),
             KuaishouExtractor(),
             XiaohongshuExtractor(),
@@ -25,7 +34,12 @@ class ExtractorRegistry:
                 if not url:
                     continue
                 return extractor.resolve(text)
+            except (LocalResolveError, httpx.HTTPError, json.JSONDecodeError) as exc:
+                logger.warning("Extractor %s failed: %s", extractor.platform, exc)
+                last_error = exc
+                continue
             except Exception as exc:
+                logger.exception("Unexpected error in extractor %s", extractor.platform)
                 last_error = exc
                 continue
         if last_error:

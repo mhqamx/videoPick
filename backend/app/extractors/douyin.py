@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import re
 
-from .base import ResolvedVideo
+from .base import BaseExtractor, ResolvedVideo
 from ..local_resolver import LocalResolveError, download_video_bytes, resolve_video
 
 
-class DouyinExtractor:
+class DouyinExtractor(BaseExtractor):
     platform = "douyin"
+    _CDN_HOSTS = ("douyin.com", "iesdouyin.com", "snssdk.com")
+    _default_referer = "https://www.douyin.com/"
 
     _short_pattern = re.compile(r"https?://v\.douyin\.com/[a-zA-Z0-9_]+/?", re.I)
     _long_pattern = re.compile(
@@ -28,9 +30,6 @@ class DouyinExtractor:
             if any(d in candidate for d in ("douyin.com", "iesdouyin.com")):
                 return candidate
         return None
-
-    def can_handle_source(self, source_url: str) -> bool:
-        return any(host in source_url for host in ("douyin.com", "iesdouyin.com", "snssdk.com"))
 
     def resolve(self, text: str) -> ResolvedVideo:
         url = self.extract_url(text)

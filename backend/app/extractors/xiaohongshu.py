@@ -4,14 +4,14 @@ import json
 import re
 import time
 
-import httpx
-
-from .base import ResolvedVideo
+from .base import BaseExtractor, ResolvedVideo, resolve_client
 from ..local_resolver import LocalResolveError
 
 
-class XiaohongshuExtractor:
+class XiaohongshuExtractor(BaseExtractor):
     platform = "xiaohongshu"
+    _CDN_HOSTS = ("xhscdn.com", "xhscdn.net")
+    _default_referer = "https://www.xiaohongshu.com/"
 
     # 短链：http://xhslink.com/o/2z7YRSHBEWZ 或 http://xhslink.com/AbCd1234
     _short_pattern = re.compile(
@@ -23,9 +23,6 @@ class XiaohongshuExtractor:
         re.I,
     )
 
-    # 小红书 CDN 主机名片段
-    _CDN_HOSTS = ("xhscdn.com", "xhscdn.net")
-
     def extract_url(self, text: str) -> str | None:
         for pattern in (self._short_pattern, self._long_pattern):
             match = pattern.search(text)
@@ -33,21 +30,17 @@ class XiaohongshuExtractor:
                 return match.group(0).strip().rstrip("。.,!;，！；")
         return None
 
-    def can_handle_source(self, source_url: str) -> bool:
-        return any(host in source_url for host in self._CDN_HOSTS)
-
     def resolve(self, text: str) -> ResolvedVideo:
         url = self.extract_url(text)
         if not url:
             raise LocalResolveError("No XiaoHongShu URL found in input")
 
         try:
-            headers = self._http_headers()
-            with httpx.Client(timeout=20, follow_redirects=True, headers=headers) as client:
-                resp = client.get(url)
-                resp.raise_for_status()
-                html = resp.text
-                webpage_url = str(resp.url)
+            headers = self.default_http_headers(self._default_referer)
+            resp = resolve_client.get(url, headers=headers)
+            resp.raise_for_status()
+            html = resp.text
+            webpage_url = str(resp.url)
         except LocalResolveError:
             raise
         except Exception as exc:
@@ -71,40 +64,9 @@ class XiaohongshuExtractor:
             candidates=candidates,
         )
 
-    def download_bytes(self, source_url: str) -> tuple[bytes, str]:
-        headers = self._http_headers() | {
-            "Accept": "*/*",
-            "Range": "bytes=0-",
-        }
-        try:
-            with httpx.Client(timeout=60, follow_redirects=True, headers=headers) as client:
-                resp = client.get(source_url)
-                if 200 <= resp.status_code < 300 and resp.content:
-                    return resp.content, source_url
-            raise LocalResolveError(
-                f"XiaoHongShu download failed: status={resp.status_code}"
-            )
-        except LocalResolveError:
-            raise
-        except Exception as exc:
-            raise LocalResolveError(f"XiaoHongShu download failed: {exc}") from exc
-
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _http_headers() -> dict[str, str]:
-        return {
-            "User-Agent": (
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
-                "Mobile/15E148 Safari/604.1"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh-Hans;q=0.9",
-            "Referer": "https://www.xiaohongshu.com/",
-        }
 
     @staticmethod
     def _extract_note_id_from_url(url: str) -> str | None:
