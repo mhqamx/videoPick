@@ -37,8 +37,121 @@ private struct StableVideoPlayerView: View {
     }
 }
 
+// MARK: - 全屏图片查看器（支持缩放 + 左右翻页）
+
+private struct FullscreenImageViewer: View {
+    let imageURLs: [URL]
+    @Binding var currentIndex: Int
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            TabView(selection: $currentIndex) {
+                ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
+                    ZoomableImageView(url: url)
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .shadow(radius: 4)
+                    }
+                    .padding(20)
+                }
+
+                Spacer()
+
+                Text("\(currentIndex + 1) / \(imageURLs.count)")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.bottom, 40)
+            }
+        }
+        .statusBarHidden(true)
+    }
+}
+
+private struct ZoomableImageView: View {
+    let url: URL
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geo in
+            if let data = try? Data(contentsOf: url),
+               let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                scale = max(1.0, lastScale * value.magnification)
+                            }
+                            .onEnded { value in
+                                lastScale = scale
+                                if scale <= 1.0 {
+                                    withAnimation(.spring(duration: 0.3)) {
+                                        scale = 1.0
+                                        lastScale = 1.0
+                                        offset = .zero
+                                        lastOffset = .zero
+                                    }
+                                }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { value in
+                                guard scale > 1.0 else { return }
+                                offset = CGSize(
+                                    width: lastOffset.width + value.translation.width,
+                                    height: lastOffset.height + value.translation.height
+                                )
+                            }
+                            .onEnded { _ in
+                                lastOffset = offset
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(duration: 0.3)) {
+                            if scale > 1.0 {
+                                scale = 1.0
+                                lastScale = 1.0
+                                offset = .zero
+                                lastOffset = .zero
+                            } else {
+                                scale = 3.0
+                                lastScale = 3.0
+                            }
+                        }
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+            } else {
+                ProgressView()
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
+        }
+    }
+}
+
 struct DouyinDownloadView: View {
     @StateObject private var viewModel = DouyinDownloadViewModel()
+    @State private var selectedImageIndex: Int = 0
+    @State private var showFullscreenImage = false
 
     #if targetEnvironment(macCatalyst)
     private let isMac = true
@@ -121,7 +234,7 @@ struct DouyinDownloadView: View {
                 .font(isMac ? .title3 : .title2)
                 .fontWeight(.bold)
 
-            Text("支持抖音、TikTok、B站、快手、小红书分享链接")
+            Text("支持抖音、TikTok、Instagram、B站、快手、小红书分享链接")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -293,26 +406,43 @@ struct DouyinDownloadView: View {
         .cornerRadius(12)
     }
 
-    // MARK: - 图片画廊
+    // MARK: - 图片缩略图网格
+
+    private let thumbColumns = [
+        GridItem(.adaptive(minimum: 80, maximum: 120), spacing: 8)
+    ]
 
     private func imageGalleryView(_ imageURLs: [URL]) -> some View {
-        TabView {
+        LazyVGrid(columns: thumbColumns, spacing: 8) {
             ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
-                if let data = try? Data(contentsOf: url),
-                   let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .cornerRadius(8)
-                        .tag(index)
-                } else {
-                    ProgressView()
-                        .tag(index)
+                Button {
+                    selectedImageIndex = index
+                    showFullscreenImage = true
+                } label: {
+                    if let data = try? Data(contentsOf: url),
+                       let uiImage = UIImage(data: data) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(minWidth: 80, minHeight: 80)
+                            .aspectRatio(1, contentMode: .fill)
+                            .clipped()
+                            .cornerRadius(8)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.gray.opacity(0.2))
+                            .aspectRatio(1, contentMode: .fill)
+                            .overlay(ProgressView())
+                    }
                 }
             }
         }
-        .tabViewStyle(.page(indexDisplayMode: .automatic))
-        .cornerRadius(12)
+        .fullScreenCover(isPresented: $showFullscreenImage) {
+            FullscreenImageViewer(
+                imageURLs: imageURLs,
+                currentIndex: $selectedImageIndex
+            )
+        }
     }
 
     // MARK: - 通用组件

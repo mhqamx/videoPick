@@ -4,7 +4,7 @@
 
 当前特点：
 - 不依赖 `yt-dlp`
-- 支持抖音、B站、快手、小红书平台视频解析
+- 支持抖音、TikTok、Instagram、B站、快手、小红书平台视频解析
 - 提供统一 API 给 iOS 调用
 - Extractor 插件架构，易于扩展新平台
 
@@ -78,6 +78,16 @@ curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://v.kuaishou.com/71hf92tY 快手作品"}'
 
+# TikTok
+curl -X POST http://127.0.0.1:8000/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"https://vm.tiktok.com/ZP8QJ3cWW/"}'
+
+# Instagram（需 cookie）
+curl -X POST http://127.0.0.1:8000/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"https://www.instagram.com/reel/DVXmWNtk1GC/"}'
+
 # B站
 curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
@@ -88,6 +98,22 @@ curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"http://xhslink.com/o/2z7YRSHBEWZ 小红书笔记"}'
 ```
+
+## Instagram Cookie
+
+Instagram Extractor 默认读取：
+
+- `~/Downloads/www.instagram.com_cookies.txt`
+
+可通过环境变量覆盖：
+
+```bash
+export INSTAGRAM_COOKIE_FILE="/Users/maxiao/Downloads/www.instagram.com_cookies.txt"
+```
+
+要求：
+- 建议导出 Netscape 格式 cookie 文件
+- 文件里需包含 `sessionid`（建议包含 `csrftoken`）
 
 ## B站当前范围说明
 

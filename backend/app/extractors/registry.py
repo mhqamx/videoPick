@@ -8,6 +8,7 @@ import httpx
 from .base import ResolvedVideo, VideoExtractor
 from .bilibili import BilibiliExtractor
 from .douyin import DouyinExtractor
+from .instagram import InstagramExtractor
 from .kuaishou import KuaishouExtractor
 from .tiktok import TikTokExtractor
 from .xiaohongshu import XiaohongshuExtractor
@@ -21,6 +22,7 @@ class ExtractorRegistry:
         self.extractors: list[VideoExtractor] = [
             DouyinExtractor(),
             TikTokExtractor(),
+            InstagramExtractor(),
             BilibiliExtractor(),
             KuaishouExtractor(),
             XiaohongshuExtractor(),

@@ -17,6 +17,7 @@ _ALLOWED_CDN_HOSTS = (
     "douyincdn.com", "byteimg.com",
     "tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokv.com",
     "byteoversea.com", "ibytedtos.com", "muscdn.com",
+    "instagram.com", "cdninstagram.com", "fbcdn.net",
     "bilibili.com", "bilivideo.com", "bilivideo.cn", "hdslb.com",
     "kwimgs.com", "kwai.net", "kuaishou.com", "yximgs.com",
     "xiaohongshu.com", "xhscdn.com", "xhscdn.net", "xhslink.com",
