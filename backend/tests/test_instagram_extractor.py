@@ -120,6 +120,7 @@ class TestParseHtml:
                 {
                     "id": "3843709459303190914_54675136281",
                     "code": "DVXmWNtk1GC",
+                    "media_type": 2,
                     "caption": {"text": "来自 media info 的标题"},
                     "video_versions": [
                         {
@@ -129,11 +130,66 @@ class TestParseHtml:
                 }
             ]
         }
-        title, video_id, candidates, webpage_url = self.ext._extract_from_media_info_payload(payload)
+        title, video_id, candidates, image_urls, webpage_url = self.ext._extract_from_media_info_payload(payload)
         assert title == "来自 media info 的标题"
         assert video_id == "3843709459303190914_54675136281"
         assert candidates[0].endswith("abcdef.mp4")
+        assert image_urls == []
         assert webpage_url == "https://www.instagram.com/reel/DVXmWNtk1GC/"
+
+    def test_extract_from_media_info_payload_image_carousel(self):
+        payload = {
+            "items": [
+                {
+                    "id": "3837213674872331406_74350098078",
+                    "code": "DVAhYHCCVyO",
+                    "media_type": 8,
+                    "caption": {"text": "图文帖子"},
+                    "image_versions2": {
+                        "candidates": [
+                            {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/cover_s150.heic", "width": 150, "height": 150},
+                            {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/cover_s480.heic", "width": 480, "height": 480},
+                        ]
+                    },
+                    "carousel_media": [
+                        {
+                            "media_type": 1,
+                            "image_versions2": {
+                                "candidates": [
+                                    {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/1_s150.heic", "width": 150, "height": 150},
+                                    {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/1_s720.heic", "width": 720, "height": 720},
+                                ]
+                            },
+                        },
+                        {
+                            "media_type": 1,
+                            "image_versions2": {
+                                "candidates": [
+                                    {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/2_s150.heic", "width": 150, "height": 150},
+                                    {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/2_s720.heic", "width": 720, "height": 720},
+                                ]
+                            },
+                        },
+                        {
+                            "media_type": 1,
+                            "image_versions2": {
+                                "candidates": [
+                                    {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/3_s150.heic", "width": 150, "height": 150},
+                                    {"url": "https://scontent-nrt6-1.cdninstagram.com/v/t51.82787-15/3_s720.heic", "width": 720, "height": 720},
+                                ]
+                            },
+                        },
+                    ],
+                }
+            ]
+        }
+        title, video_id, candidates, image_urls, webpage_url = self.ext._extract_from_media_info_payload(payload)
+        assert title == "图文帖子"
+        assert video_id == "3837213674872331406_74350098078"
+        assert candidates == []
+        assert len(image_urls) == 3
+        assert image_urls[0].endswith("1_s720.heic")
+        assert webpage_url == "https://www.instagram.com/p/DVAhYHCCVyO/"
 
 
 class TestRegistryIntegration:

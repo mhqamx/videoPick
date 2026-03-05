@@ -92,6 +92,9 @@ def download(source: str = Query(..., description="Resolved video source URL")) 
         if any(ext in lower_source for ext in (".webp", "format=webp", "type=webp")):
             media_type = "image/webp"
             filename = "image.webp"
+        elif any(ext in lower_source for ext in (".heic", ".heif", "format=heic", "format=heif")):
+            media_type = "image/heic"
+            filename = "image.heic"
         elif any(ext in lower_source for ext in (".jpeg", ".jpg", "format=jpeg")):
             media_type = "image/jpeg"
             filename = "image.jpeg"

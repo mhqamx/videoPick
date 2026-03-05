@@ -21,9 +21,9 @@ import AppKit
 actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
     private let backendResolveURLs: [URL] = [
+        URL(string: "http://127.0.0.1:8000/resolve")!,
         URL(string: "http://192.168.1.100:8000/resolve")!,
         URL(string: "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve")!,
-//        URL(string: "http://127.0.0.1:8000/resolve")!
     ]
 
     private init() {}

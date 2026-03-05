@@ -61,23 +61,25 @@ class InstagramExtractor(BaseExtractor):
         cookie_jar = self._load_instagram_cookies()
         normalized_url = self._normalize_input_url(url)
         title = None
-        candidates: list[str] = []
+        video_candidates: list[str] = []
+        image_urls: list[str] = []
         webpage_url = normalized_url
         video_id: str | None = None
 
         # 优先走 cookie API 链路：oembed -> media info
-        api_title, api_video_id, api_candidates, api_webpage_url = self._resolve_via_private_api(
+        api_title, api_video_id, api_video_candidates, api_image_urls, api_webpage_url = self._resolve_via_private_api(
             normalized_url,
             cookie_jar,
         )
-        if api_candidates:
+        if api_video_candidates or api_image_urls:
             title = api_title
-            candidates = api_candidates
+            video_candidates = api_video_candidates
+            image_urls = api_image_urls
             video_id = api_video_id
             if api_webpage_url:
                 webpage_url = api_webpage_url
 
-        if not candidates:
+        if not video_candidates and not image_urls:
             headers = self._build_headers(normalized_url)
             try:
                 resp = resolve_client.get(normalized_url, headers=headers, cookies=cookie_jar)
@@ -88,26 +90,40 @@ class InstagramExtractor(BaseExtractor):
 
             json_title, json_candidates = self._resolve_via_json(webpage_url, cookie_jar)
             title = title or json_title
-            candidates = json_candidates
+            video_candidates = json_candidates
 
-            if not candidates:
+            if not video_candidates:
                 html_title, html_candidates = self._parse_html(resp.text)
                 title = title or html_title
-                candidates = html_candidates
+                video_candidates = html_candidates
 
-        if not candidates:
-            raise LocalResolveError("No video link found in Instagram page (cookie may be expired)")
+        if not video_candidates and not image_urls:
+            raise LocalResolveError("No media link found in Instagram page (cookie may be expired)")
 
         shortcode = self._extract_shortcode_from_url(webpage_url) or self._extract_shortcode_from_url(normalized_url)
         video_id = video_id or shortcode or f"ig_unknown_{int(time.time())}"
+
+        if image_urls and not video_candidates:
+            return ResolvedVideo(
+                platform=self.platform,
+                input_url=url,
+                webpage_url=webpage_url,
+                title=title,
+                video_id=video_id,
+                best_url=image_urls[0],
+                candidates=image_urls,
+                media_type="image",
+                image_urls=image_urls,
+            )
+
         return ResolvedVideo(
             platform=self.platform,
             input_url=url,
             webpage_url=webpage_url,
             title=title,
             video_id=video_id,
-            best_url=candidates[0],
-            candidates=candidates,
+            best_url=video_candidates[0],
+            candidates=video_candidates,
         )
 
     def download_bytes(self, source_url: str) -> tuple[bytes, str]:
@@ -156,7 +172,13 @@ class InstagramExtractor(BaseExtractor):
     @staticmethod
     def _resolve_cookie_file() -> Path | None:
         env_path = os.getenv("INSTAGRAM_COOKIE_FILE")
-        candidates = [env_path, str(Path.home() / "Downloads" / "www.instagram.com_cookies.txt")]
+        backend_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            env_path,
+            str(backend_root / "cookies" / "www.instagram.com_cookies.txt"),
+            str(backend_root / "www.instagram.com_cookies.txt"),
+            str(Path.home() / "Downloads" / "www.instagram.com_cookies.txt"),
+        ]
         for raw in candidates:
             if not raw:
                 continue
@@ -208,7 +230,7 @@ class InstagramExtractor(BaseExtractor):
         self,
         normalized_url: str,
         cookies: dict[str, str],
-    ) -> tuple[str | None, str | None, list[str], str | None]:
+    ) -> tuple[str | None, str | None, list[str], list[str], str | None]:
         headers = self._build_headers(normalized_url) | {
             "Accept": "application/json, text/plain, */*",
             "X-IG-App-ID": "936619743392459",
@@ -225,12 +247,12 @@ class InstagramExtractor(BaseExtractor):
             oembed_resp.raise_for_status()
             oembed_payload = oembed_resp.json()
         except Exception:
-            return None, None, [], None
+            return None, None, [], [], None
 
         media_id = oembed_payload.get("media_id")
         fallback_title = oembed_payload.get("title") if isinstance(oembed_payload.get("title"), str) else None
         if not isinstance(media_id, str) or not media_id:
-            return fallback_title, None, [], None
+            return fallback_title, None, [], [], None
 
         try:
             info_resp = resolve_client.get(
@@ -241,33 +263,38 @@ class InstagramExtractor(BaseExtractor):
             info_resp.raise_for_status()
             info_payload = info_resp.json()
         except Exception:
-            return fallback_title, media_id, [], None
+            return fallback_title, media_id, [], [], None
 
-        title, video_id, candidates, webpage_url = self._extract_from_media_info_payload(
+        title, video_id, video_candidates, image_urls, webpage_url = self._extract_from_media_info_payload(
             info_payload,
             fallback_title=fallback_title,
         )
-        return title, video_id or media_id, candidates, webpage_url
+        return title, video_id or media_id, video_candidates, image_urls, webpage_url
 
     def _extract_from_media_info_payload(
         self,
         payload: object,
         fallback_title: str | None = None,
-    ) -> tuple[str | None, str | None, list[str], str | None]:
+    ) -> tuple[str | None, str | None, list[str], list[str], str | None]:
         if not isinstance(payload, dict):
-            return fallback_title, None, [], None
+            return fallback_title, None, [], [], None
         items = payload.get("items")
         if not isinstance(items, list) or not items:
-            return fallback_title, None, [], None
+            return fallback_title, None, [], [], None
         item = items[0] if isinstance(items[0], dict) else None
         if not isinstance(item, dict):
-            return fallback_title, None, [], None
+            return fallback_title, None, [], [], None
 
         video_id_obj = item.get("id") or item.get("pk")
         video_id = str(video_id_obj) if video_id_obj is not None else None
 
         code = item.get("code")
-        webpage_url = f"https://www.instagram.com/reel/{code}/" if isinstance(code, str) and code else None
+        media_type = item.get("media_type")
+        if isinstance(code, str) and code:
+            prefix = "reel" if media_type == 2 else "p"
+            webpage_url = f"https://www.instagram.com/{prefix}/{code}/"
+        else:
+            webpage_url = None
 
         title = fallback_title
         caption = item.get("caption")
@@ -276,18 +303,30 @@ class InstagramExtractor(BaseExtractor):
             if isinstance(caption_text, str) and caption_text.strip():
                 title = caption_text.strip()
 
-        candidates: list[str] = []
-        candidates.extend(self._extract_urls_from_video_versions(item.get("video_versions")))
+        video_candidates: list[str] = []
+        image_urls: list[str] = []
 
         carousel = item.get("carousel_media")
-        if isinstance(carousel, list):
+        if isinstance(carousel, list) and carousel:
             for media_item in carousel:
                 if isinstance(media_item, dict):
-                    candidates.extend(
+                    video_candidates.extend(
                         self._extract_urls_from_video_versions(media_item.get("video_versions"))
                     )
+                    image_urls.extend(
+                        self._extract_urls_from_image_versions(media_item.get("image_versions2"))
+                    )
+        else:
+            video_candidates.extend(self._extract_urls_from_video_versions(item.get("video_versions")))
+            image_urls.extend(self._extract_urls_from_image_versions(item.get("image_versions2")))
 
-        return title, video_id, list(dict.fromkeys(candidates)), webpage_url
+        return (
+            title,
+            video_id,
+            list(dict.fromkeys(video_candidates)),
+            list(dict.fromkeys(image_urls)),
+            webpage_url,
+        )
 
     def _extract_urls_from_video_versions(self, video_versions: object) -> list[str]:
         if not isinstance(video_versions, list):
@@ -302,6 +341,41 @@ class InstagramExtractor(BaseExtractor):
                 if normalized:
                     candidates.append(normalized)
         return candidates
+
+    def _extract_urls_from_image_versions(self, image_versions2: object) -> list[str]:
+        if not isinstance(image_versions2, dict):
+            return []
+        candidates = image_versions2.get("candidates")
+        if not isinstance(candidates, list):
+            return []
+        best = self._pick_best_image_candidate(candidates)
+        if not best:
+            return []
+        normalized = self._normalize_image_candidate(best)
+        return [normalized] if normalized else []
+
+    @staticmethod
+    def _pick_best_image_candidate(candidates: list[object]) -> str | None:
+        best_url: str | None = None
+        best_area = -1
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            if not isinstance(url, str):
+                continue
+            width = item.get("width")
+            height = item.get("height")
+            if isinstance(width, int) and isinstance(height, int):
+                area = width * height
+            else:
+                area = 0
+            if area > best_area:
+                best_area = area
+                best_url = url
+            elif best_url is None:
+                best_url = url
+        return best_url
 
     def _resolve_via_json(self, webpage_url: str, cookies: dict[str, str]) -> tuple[str | None, list[str]]:
         api_url = self._append_query(webpage_url, {"__a": "1", "__d": "dis"})
@@ -438,6 +512,30 @@ class InstagramExtractor(BaseExtractor):
         if any(host == d or host.endswith("." + d) for d in self._CDN_HOSTS):
             if ".mp4" in url.lower() or "bytestart" in url.lower() or "video" in url.lower():
                 return url
+        return None
+
+    def _normalize_image_candidate(self, value: str) -> str | None:
+        url = value.strip()
+        if not url.startswith("http"):
+            return None
+
+        url = (
+            url.replace("\\u002F", "/")
+            .replace("\\u0026", "&")
+            .replace("\\/", "/")
+            .replace("&amp;", "&")
+        )
+        url = html_lib.unescape(url)
+
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except Exception:
+            return None
+        if not host:
+            return None
+
+        if any(host == d or host.endswith("." + d) for d in self._CDN_HOSTS):
+            return url
         return None
 
     @staticmethod

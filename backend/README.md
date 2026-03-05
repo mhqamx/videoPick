@@ -5,6 +5,7 @@
 当前特点：
 - 不依赖 `yt-dlp`
 - 支持抖音、TikTok、Instagram、B站、快手、小红书平台视频解析
+- Instagram 支持 cookie 模式解析 Reel/帖子（含图文多图）
 - 提供统一 API 给 iOS 调用
 - Extractor 插件架构，易于扩展新平台
 
