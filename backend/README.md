@@ -4,8 +4,9 @@
 
 当前特点：
 - 不依赖 `yt-dlp`
-- 支持抖音、TikTok、Instagram、B站、快手、小红书平台视频解析
+- 支持抖音、TikTok、Instagram、X、B站、快手、小红书平台视频解析
 - Instagram 支持 cookie 模式解析 Reel/帖子（含图文多图）
+- X 支持 cookie 模式解析 status 视频
 - 提供统一 API 给 iOS 调用
 - Extractor 插件架构，易于扩展新平台
 
@@ -89,6 +90,11 @@ curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://www.instagram.com/reel/DVXmWNtk1GC/"}'
 
+# X（需 cookie）
+curl -X POST http://127.0.0.1:8000/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"https://x.com/SSSQ58/status/2028415517846012266?s=20"}'
+
 # B站
 curl -X POST http://127.0.0.1:8000/resolve \
   -H 'Content-Type: application/json' \
@@ -115,6 +121,23 @@ export INSTAGRAM_COOKIE_FILE="/Users/maxiao/Downloads/www.instagram.com_cookies.
 要求：
 - 建议导出 Netscape 格式 cookie 文件
 - 文件里需包含 `sessionid`（建议包含 `csrftoken`）
+
+## X Cookie
+
+X Extractor 默认读取：
+
+- `backend/cookies/x.com_cookies.txt`
+- `~/Downloads/x.com_cookies.txt`
+
+可通过环境变量覆盖：
+
+```bash
+export X_COOKIE_FILE="/Users/maxiao/Downloads/x.com_cookies.txt"
+```
+
+要求：
+- 建议导出 Netscape 格式 cookie 文件
+- 文件里需包含 `auth_token` 与 `ct0`
 
 ## B站当前范围说明
 

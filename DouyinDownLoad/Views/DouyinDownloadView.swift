@@ -234,7 +234,7 @@ struct DouyinDownloadView: View {
                 .font(isMac ? .title3 : .title2)
                 .fontWeight(.bold)
 
-            Text("支持抖音、TikTok、Instagram、B站、快手、小红书分享链接")
+            Text("支持抖音、TikTok、Instagram、X、B站、快手、小红书分享链接")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }

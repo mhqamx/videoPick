@@ -11,6 +11,7 @@ from .douyin import DouyinExtractor
 from .instagram import InstagramExtractor
 from .kuaishou import KuaishouExtractor
 from .tiktok import TikTokExtractor
+from .x import XExtractor
 from .xiaohongshu import XiaohongshuExtractor
 from ..local_resolver import LocalResolveError
 
@@ -23,6 +24,7 @@ class ExtractorRegistry:
             DouyinExtractor(),
             TikTokExtractor(),
             InstagramExtractor(),
+            XExtractor(),
             BilibiliExtractor(),
             KuaishouExtractor(),
             XiaohongshuExtractor(),
