@@ -133,10 +133,11 @@ class TestParseInitialState:
         };
         </script>
         """
-        title, candidates = self.ext._parse_initial_state(html)
+        title, candidates, media_type, image_urls = self.ext._parse_initial_state(html)
         assert title == "移动端视频"
         assert len(candidates) == 2
         assert candidates[0].endswith("h264.mp4")
+        assert media_type == "video"
 
     def test_video_note_extracts_h264(self):
         html = """
@@ -162,11 +163,41 @@ class TestParseInitialState:
         };
         </script>
         """
-        title, candidates = self.ext._parse_initial_state(html)
+        title, candidates, media_type, _ = self.ext._parse_initial_state(html)
         assert title == "测试视频标题"
         assert "https://sns-video-bd.xhscdn.com/stream/abc/h264.mp4" in candidates
+        assert media_type == "video"
+
+    def test_image_note_extracts_images(self):
+        html = """
+        <script>
+        window.__INITIAL_STATE__ = {
+          "note": {
+            "noteDetailMap": {
+              "abc123": {
+                "note": {
+                  "type": "normal",
+                  "title": "图文笔记",
+                  "imageList": [
+                    {"url": "http://sns-webpic.xhscdn.com/img1.jpg", "infoList": [{"imageScene": "H5_DTL", "url": "http://sns-webpic.xhscdn.com/img1_hd.jpg"}]},
+                    {"url": "http://sns-webpic.xhscdn.com/img2.jpg", "infoList": [{"imageScene": "H5_DTL", "url": "http://sns-webpic.xhscdn.com/img2_hd.jpg"}]}
+                  ]
+                }
+              }
+            }
+          }
+        };
+        </script>
+        """
+        title, candidates, media_type, image_urls = self.ext._parse_initial_state(html)
+        assert title == "图文笔记"
+        assert media_type == "image"
+        assert len(image_urls) == 2
+        assert image_urls[0] == "https://sns-webpic.xhscdn.com/img1_hd.jpg"
+        assert candidates == []
 
     def test_image_note_skipped(self):
+        """图文笔记无 imageList 时返回空。"""
         html = """
         <script>
         window.__INITIAL_STATE__ = {
@@ -183,8 +214,9 @@ class TestParseInitialState:
         };
         </script>
         """
-        _, candidates = self.ext._parse_initial_state(html)
+        _, candidates, media_type, image_urls = self.ext._parse_initial_state(html)
         assert candidates == []
+        assert image_urls == []
 
     def test_multiple_codecs_collected(self):
         html = """
@@ -211,7 +243,7 @@ class TestParseInitialState:
         };
         </script>
         """
-        _, candidates = self.ext._parse_initial_state(html)
+        _, candidates, _, _ = self.ext._parse_initial_state(html)
         assert len(candidates) == 2
         assert candidates[0].endswith("h264.mp4")
 
@@ -228,7 +260,7 @@ class TestParseInitialState:
         };
         </script>
         """
-        _, candidates = self.ext._parse_initial_state(html)
+        _, candidates, _, _ = self.ext._parse_initial_state(html)
         assert len(candidates) == 1
 
     def test_handles_undefined_values(self):
@@ -240,17 +272,17 @@ class TestParseInitialState:
         };
         </script>
         """
-        title, candidates = self.ext._parse_initial_state(html)
+        title, candidates, _, _ = self.ext._parse_initial_state(html)
         assert candidates == []
 
     def test_no_initial_state(self):
-        title, candidates = self.ext._parse_initial_state("<html>nothing</html>")
+        title, candidates, _, _ = self.ext._parse_initial_state("<html>nothing</html>")
         assert title is None
         assert candidates == []
 
     def test_invalid_json(self):
         html = "<script>window.__INITIAL_STATE__ = {invalid json};</script>"
-        _, candidates = self.ext._parse_initial_state(html)
+        _, candidates, _, _ = self.ext._parse_initial_state(html)
         assert candidates == []
 
     def test_title_from_desc_fallback(self):
@@ -277,7 +309,7 @@ class TestParseInitialState:
         };
         </script>
         """
-        title, _ = self.ext._parse_initial_state(html)
+        title, _, _, _ = self.ext._parse_initial_state(html)
         assert title == "描述文字"
 
 

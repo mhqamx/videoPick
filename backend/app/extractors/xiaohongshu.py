@@ -47,12 +47,25 @@ class XiaohongshuExtractor(BaseExtractor):
             raise LocalResolveError(f"XiaoHongShu resolve failed: {exc}") from exc
 
         note_id = self._extract_note_id_from_url(webpage_url)
-        title, candidates = self._parse_html(html)
+        title, candidates, media_type, image_urls = self._parse_html(html)
+
+        note_id = note_id or f"xhs_unknown_{int(time.time())}"
+
+        if media_type == "image" and image_urls:
+            return ResolvedVideo(
+                platform=self.platform,
+                input_url=url,
+                webpage_url=webpage_url,
+                title=title,
+                video_id=note_id,
+                best_url=image_urls[0],
+                candidates=[],
+                media_type="image",
+                image_urls=image_urls,
+            )
 
         if not candidates:
             raise LocalResolveError("No video link found in XiaoHongShu page")
-
-        note_id = note_id or f"xhs_unknown_{int(time.time())}"
 
         return ResolvedVideo(
             platform=self.platform,
@@ -73,31 +86,32 @@ class XiaohongshuExtractor(BaseExtractor):
         m = re.search(r"/(?:explore|discovery/item)/([a-zA-Z0-9_\-]+)", url)
         return m.group(1) if m else None
 
-    def _parse_html(self, html: str) -> tuple[str | None, list[str]]:
-        """二级回退解析小红书 HTML 页面，返回 (title, candidate_urls)。"""
+    def _parse_html(self, html: str) -> tuple[str | None, list[str], str, list[str]]:
+        """解析小红书 HTML 页面，返回 (title, video_candidates, media_type, image_urls)。"""
         # 策略 1: window.__INITIAL_STATE__
-        title, candidates = self._parse_initial_state(html)
-        if candidates:
-            return title, candidates
+        title, candidates, media_type, image_urls = self._parse_initial_state(html)
+        if candidates or image_urls:
+            return title, candidates, media_type, image_urls
 
         # 策略 2: 原始 HTML 正则匹配 CDN URL
         candidates2 = self._parse_raw_html(html)
-        return None, candidates2
+        return None, candidates2, "video", []
 
-    def _parse_initial_state(self, html: str) -> tuple[str | None, list[str]]:
+    def _parse_initial_state(self, html: str) -> tuple[str | None, list[str], str, list[str]]:
+        """返回 (title, video_candidates, media_type, image_urls)。"""
         m = re.search(
             r"window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*(?:;|</script>)",
             html,
             re.S,
         )
         if not m:
-            return None, []
+            return None, [], "video", []
 
         try:
             raw = m.group(1).replace("undefined", "null")
             root = json.loads(raw)
         except Exception:
-            return None, []
+            return None, [], "video", []
 
         # 收集所有 note 对象（可能来自不同路径）
         notes: list[dict] = []
@@ -118,25 +132,50 @@ class XiaohongshuExtractor(BaseExtractor):
 
         title: str | None = None
         candidates: list[str] = []
+        image_urls: list[str] = []
 
         for note in notes:
-            if note.get("type") != "video":
-                continue
-
+            note_type = note.get("type")
             if not title:
                 title = note.get("title") or note.get("desc")
 
-            video = note.get("video") or {}
-            stream = (video.get("media") or {}).get("stream") or {}
+            # 图文笔记: type == "normal"
+            if note_type == "normal":
+                image_list = note.get("imageList") or []
+                for img in image_list:
+                    if not isinstance(img, dict):
+                        continue
+                    # 优先使用 infoList 中 H5_DTL 场景的高清图
+                    img_url = None
+                    info_list = img.get("infoList") or []
+                    for info in info_list:
+                        if isinstance(info, dict) and info.get("imageScene") == "H5_DTL":
+                            img_url = info.get("url")
+                            break
+                    # 回退到顶层 url
+                    if not img_url:
+                        img_url = img.get("url")
+                    if isinstance(img_url, str) and img_url:
+                        # 确保 https
+                        if img_url.startswith("http://"):
+                            img_url = "https://" + img_url[7:]
+                        image_urls.append(img_url)
+                if image_urls:
+                    return title, [], "image", list(dict.fromkeys(image_urls))
 
-            # 按编码优先级: h264 → h265 → av1
-            for codec in ("h264", "h265", "av1"):
-                for item in stream.get(codec) or []:
-                    url = item.get("masterUrl") if isinstance(item, dict) else None
-                    if isinstance(url, str) and url.startswith("http"):
-                        candidates.append(url)
+            # 视频笔记: type == "video"
+            if note_type == "video":
+                video = note.get("video") or {}
+                stream = (video.get("media") or {}).get("stream") or {}
 
-        return title, list(dict.fromkeys(candidates))
+                # 按编码优先级: h264 → h265 → av1
+                for codec in ("h264", "h265", "av1"):
+                    for item in stream.get(codec) or []:
+                        url = item.get("masterUrl") if isinstance(item, dict) else None
+                        if isinstance(url, str) and url.startswith("http"):
+                            candidates.append(url)
+
+        return title, list(dict.fromkeys(candidates)), "video", []
 
     @staticmethod
     def _parse_raw_html(html: str) -> list[str]:
