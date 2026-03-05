@@ -21,6 +21,8 @@ class ResolveResponse(BaseModel):
     video_id: str | None = None
     download_url: str
     formats: list[VideoFormat] = []
+    media_type: str = "video"  # "video" | "image"
+    image_urls: list[str] = []
 
 
 class ErrorResponse(BaseModel):

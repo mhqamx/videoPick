@@ -80,10 +80,10 @@ class DouyinDownloadViewModel: ObservableObject {
         downloadProgress = nil
     }
 
-    /// 保存视频（iOS 保存到相册，macOS 保存到下载目录）
-    func saveVideo() async {
-        guard let localURL = videoInfo?.localURL else {
-            errorMessage = "没有可保存的视频"
+    /// 保存媒体到相册（根据 mediaType 保存视频或图片）
+    func saveMedia() async {
+        guard let info = videoInfo else {
+            errorMessage = "没有可保存的内容"
             return
         }
 
@@ -92,22 +92,39 @@ class DouyinDownloadViewModel: ObservableObject {
         saveResult = nil
 
         do {
-            let savedURL = try await service.saveVideo(videoURL: localURL)
-            #if targetEnvironment(macCatalyst)
-            if let url = savedURL {
-                saveResult = "视频已保存到: \(url.lastPathComponent)"
-            } else {
-                saveResult = "视频已保存"
+            switch info.mediaType {
+            case .video:
+                guard let localURL = info.localURL else {
+                    errorMessage = "没有可保存的视频"
+                    isLoading = false
+                    return
+                }
+                let savedURL = try await service.saveVideo(videoURL: localURL)
+                #if targetEnvironment(macCatalyst)
+                if let url = savedURL {
+                    saveResult = "视频已保存到: \(url.lastPathComponent)"
+                } else {
+                    saveResult = "视频已保存"
+                }
+                #elseif os(iOS)
+                saveResult = "视频已保存到相册"
+                #else
+                if let url = savedURL {
+                    saveResult = "视频已保存到: \(url.lastPathComponent)"
+                } else {
+                    saveResult = "视频已保存"
+                }
+                #endif
+
+            case .images:
+                guard !info.localImageURLs.isEmpty else {
+                    errorMessage = "没有可保存的图片"
+                    isLoading = false
+                    return
+                }
+                try await service.saveImages(imageURLs: info.localImageURLs)
+                saveResult = "\(info.localImageURLs.count) 张图片已保存到相册"
             }
-            #elseif os(iOS)
-            saveResult = "视频已保存到相册"
-            #else
-            if let url = savedURL {
-                saveResult = "视频已保存到: \(url.lastPathComponent)"
-            } else {
-                saveResult = "视频已保存"
-            }
-            #endif
         } catch let error as DouyinDownloadError {
             errorMessage = error.errorDescription
         } catch {

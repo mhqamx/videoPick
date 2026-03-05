@@ -20,6 +20,12 @@ class ResolvedVideo:
     video_id: str
     best_url: str
     candidates: list[str]
+    media_type: str = "video"  # "video" | "image"
+    image_urls: list[str] | None = None
+
+    def __post_init__(self):
+        if self.image_urls is None:
+            self.image_urls = []
 
 
 class VideoExtractor(Protocol):

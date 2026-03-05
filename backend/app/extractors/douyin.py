@@ -8,7 +8,7 @@ from ..local_resolver import LocalResolveError, download_video_bytes, resolve_vi
 
 class DouyinExtractor(BaseExtractor):
     platform = "douyin"
-    _CDN_HOSTS = ("douyin.com", "iesdouyin.com", "snssdk.com")
+    _CDN_HOSTS = ("douyin.com", "iesdouyin.com", "snssdk.com", "douyinpic.com", "byteimg.com", "douyincdn.com")
     _default_referer = "https://www.douyin.com/"
 
     _short_pattern = re.compile(r"https?://v\.douyin\.com/[a-zA-Z0-9_]+/?", re.I)
@@ -45,6 +45,8 @@ class DouyinExtractor(BaseExtractor):
             video_id=resolved.video_id,
             best_url=resolved.best_url,
             candidates=resolved.candidates,
+            media_type=resolved.media_type,
+            image_urls=resolved.image_urls,
         )
 
     def download_bytes(self, source_url: str) -> tuple[bytes, str]:

@@ -221,23 +221,39 @@ struct DouyinDownloadView: View {
                     .padding(.top, 20)
             }
 
-            if let localURL = videoInfo.localURL {
-                StableVideoPlayerView(url: localURL)
-                    .cornerRadius(12)
-                    .padding(.horizontal, 24)
+            switch videoInfo.mediaType {
+            case .video:
+                if let localURL = videoInfo.localURL {
+                    StableVideoPlayerView(url: localURL)
+                        .cornerRadius(12)
+                        .padding(.horizontal, 24)
 
-                saveButton
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 20)
+                    saveButton
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 20)
+                }
+            case .images:
+                if !videoInfo.localImageURLs.isEmpty {
+                    imageGalleryView(videoInfo.localImageURLs)
+                        .padding(.horizontal, 24)
+
+                    Text("共 \(videoInfo.localImageURLs.count) 张图片")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    saveButton
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 20)
+                }
             }
         }
     }
 
-    // MARK: - iOS 视频预览
+    // MARK: - iOS 媒体预览
 
     private func videoPreviewSection(_ videoInfo: DouyinVideoInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("视频信息")
+            Text(videoInfo.mediaType == .video ? "视频信息" : "图文信息")
                 .font(.headline)
 
             if let title = videoInfo.title {
@@ -250,12 +266,26 @@ struct DouyinDownloadView: View {
                 .font(.subheadline)
             }
 
-            if let localURL = videoInfo.localURL {
-                StableVideoPlayerView(url: localURL)
-                    .frame(height: 300)
-                    .cornerRadius(12)
+            switch videoInfo.mediaType {
+            case .video:
+                if let localURL = videoInfo.localURL {
+                    StableVideoPlayerView(url: localURL)
+                        .frame(height: 300)
+                        .cornerRadius(12)
 
-                saveButton
+                    saveButton
+                }
+            case .images:
+                if !videoInfo.localImageURLs.isEmpty {
+                    Text("共 \(videoInfo.localImageURLs.count) 张图片")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    imageGalleryView(videoInfo.localImageURLs)
+                        .frame(height: 300)
+
+                    saveButton
+                }
             }
         }
         .padding()
@@ -263,11 +293,33 @@ struct DouyinDownloadView: View {
         .cornerRadius(12)
     }
 
+    // MARK: - 图片画廊
+
+    private func imageGalleryView(_ imageURLs: [URL]) -> some View {
+        TabView {
+            ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, url in
+                if let data = try? Data(contentsOf: url),
+                   let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .cornerRadius(8)
+                        .tag(index)
+                } else {
+                    ProgressView()
+                        .tag(index)
+                }
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .automatic))
+        .cornerRadius(12)
+    }
+
     // MARK: - 通用组件
 
     private var saveButton: some View {
         Button(action: {
-            Task { await viewModel.saveVideo() }
+            Task { await viewModel.saveMedia() }
         }) {
             #if targetEnvironment(macCatalyst)
             let saveLabel = "保存到下载目录"

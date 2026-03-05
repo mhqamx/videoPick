@@ -22,6 +22,12 @@ class LocalResolvedVideo:
     video_id: str
     best_url: str
     candidates: list[str]
+    media_type: str = "video"  # "video" | "image"
+    image_urls: list[str] | None = None
+
+    def __post_init__(self):
+        if self.image_urls is None:
+            self.image_urls = []
 
 
 def _http_headers() -> dict[str, str]:
@@ -89,10 +95,48 @@ def _build_candidates_from_item(item: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
-def _parse_from_json(root: Any) -> tuple[str | None, str | None, list[str]]:
+def _build_image_urls_from_item(item: dict[str, Any]) -> list[str]:
+    """从图文作品 item 中提取无水印图片 URL 列表。"""
+    image_urls: list[str] = []
+    images = item.get("images") or []
+    if not isinstance(images, list):
+        return image_urls
+    for img in images:
+        if not isinstance(img, dict):
+            continue
+        url_list = img.get("url_list") or []
+        if not isinstance(url_list, list) or not url_list:
+            continue
+        # 优先选 jpeg/jpg，其次任意可用 URL
+        chosen = None
+        for u in url_list:
+            if isinstance(u, str) and u:
+                if chosen is None:
+                    chosen = u
+                if "jpeg" in u.lower() or "jpg" in u.lower():
+                    chosen = u
+                    break
+        if chosen:
+            image_urls.append(chosen)
+    return image_urls
+
+
+def _is_image_post(item: dict[str, Any]) -> bool:
+    """判断一个 aweme item 是否为图文作品。"""
+    aweme_type = item.get("aweme_type")
+    if aweme_type == 2 or aweme_type == "2":
+        return True
+    images = item.get("images")
+    return isinstance(images, list) and len(images) > 0
+
+
+def _parse_from_json(root: Any) -> tuple[str | None, str | None, list[str], str, list[str]]:
+    """返回 (title, video_id, candidates, media_type, image_urls)"""
     title: str | None = None
     video_id: str | None = None
     candidates: list[str] = []
+    media_type: str = "video"
+    image_urls: list[str] = []
 
     if isinstance(root, dict):
         loader = root.get("loaderData")
@@ -108,18 +152,33 @@ def _parse_from_json(root: Any) -> tuple[str | None, str | None, list[str]]:
                     first = items[0] if isinstance(items[0], dict) else {}
                     title = first.get("desc") if isinstance(first.get("desc"), str) else title
                     video_id = first.get("aweme_id") if isinstance(first.get("aweme_id"), str) else video_id
-                    candidates.extend(_build_candidates_from_item(first))
-                    if candidates:
-                        break
+                    if _is_image_post(first):
+                        media_type = "image"
+                        image_urls = _build_image_urls_from_item(first)
+                        if image_urls:
+                            break
+                    else:
+                        candidates.extend(_build_candidates_from_item(first))
+                        if candidates:
+                            break
 
-    if not candidates:
+    if not candidates and not image_urls:
+        # 先尝试找图文
+        aweme = _find_dict_containing(root, "images")
+        if isinstance(aweme, dict) and _is_image_post(aweme):
+            title = aweme.get("desc") if isinstance(aweme.get("desc"), str) else title
+            video_id = aweme.get("aweme_id") if isinstance(aweme.get("aweme_id"), str) else video_id
+            media_type = "image"
+            image_urls = _build_image_urls_from_item(aweme)
+
+    if not candidates and media_type == "video":
         aweme = _find_dict_containing(root, "video")
         if isinstance(aweme, dict):
             title = aweme.get("desc") if isinstance(aweme.get("desc"), str) else title
             video_id = aweme.get("aweme_id") if isinstance(aweme.get("aweme_id"), str) else video_id
             candidates.extend(_build_candidates_from_item(aweme))
 
-    return title, video_id, list(dict.fromkeys(candidates))
+    return title, video_id, list(dict.fromkeys(candidates)), media_type, image_urls
 
 
 def _parse_from_raw_html(html: str) -> list[str]:
@@ -157,15 +216,31 @@ def resolve_video(url: str) -> LocalResolvedVideo:
     video_id: str | None = None
     candidates: list[str] = []
 
+    media_type: str = "video"
+    image_urls: list[str] = []
+
     if json_payload:
         if is_render_data:
             json_payload = unquote(json_payload)
         json_payload = json_payload.replace("undefined", "null")
         try:
             root = json.loads(json_payload)
-            title, video_id, candidates = _parse_from_json(root)
+            title, video_id, candidates, media_type, image_urls = _parse_from_json(root)
         except (json.JSONDecodeError, ValueError, KeyError):
             candidates = []
+
+    if media_type == "image" and image_urls:
+        video_id = video_id or f"unknown_{int(time.time())}"
+        return LocalResolvedVideo(
+            input_url=url,
+            webpage_url=webpage_url,
+            title=title,
+            video_id=video_id,
+            best_url=image_urls[0],
+            candidates=[],
+            media_type="image",
+            image_urls=image_urls,
+        )
 
     if not candidates:
         candidates = _parse_from_raw_html(html)

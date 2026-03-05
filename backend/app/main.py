@@ -14,6 +14,7 @@ from .extractors.base import close_shared_clients
 
 _ALLOWED_CDN_HOSTS = (
     "douyin.com", "iesdouyin.com", "douyinpic.com", "douyinvod.com",
+    "douyincdn.com", "byteimg.com",
     "tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokv.com",
     "byteoversea.com", "ibytedtos.com", "muscdn.com",
     "bilibili.com", "bilivideo.com", "bilivideo.cn", "hdslb.com",
@@ -53,7 +54,15 @@ def health() -> dict[str, str]:
 def resolve(req: ResolveRequest, request: Request) -> ResolveResponse:
     try:
         resolved = registry.resolve(req.text)
-        proxy_url = build_proxy_download_url(str(request.base_url), resolved.best_url)
+        base = str(request.base_url)
+        proxy_url = build_proxy_download_url(base, resolved.best_url)
+
+        # 将图片 URL 转为代理下载地址
+        proxy_image_urls = [
+            build_proxy_download_url(base, img_url)
+            for img_url in (resolved.image_urls or [])
+        ]
+
         return ResolveResponse(
             input_url=resolved.input_url,
             webpage_url=resolved.webpage_url,
@@ -63,6 +72,8 @@ def resolve(req: ResolveRequest, request: Request) -> ResolveResponse:
             video_id=resolved.video_id,
             download_url=proxy_url,
             formats=[],
+            media_type=resolved.media_type,
+            image_urls=proxy_image_urls,
         )
     except LocalResolveError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -74,10 +85,26 @@ def download(source: str = Query(..., description="Resolved video source URL")) 
         raise HTTPException(status_code=400, detail="Source URL not in allowed CDN hosts")
     try:
         content, selected = registry.download(source)
+
+        # 根据 URL 判断媒体类型
+        lower_source = source.lower()
+        if any(ext in lower_source for ext in (".webp", "format=webp", "type=webp")):
+            media_type = "image/webp"
+            filename = "image.webp"
+        elif any(ext in lower_source for ext in (".jpeg", ".jpg", "format=jpeg")):
+            media_type = "image/jpeg"
+            filename = "image.jpeg"
+        elif any(ext in lower_source for ext in (".png", "format=png")):
+            media_type = "image/png"
+            filename = "image.png"
+        else:
+            media_type = "video/mp4"
+            filename = "video.mp4"
+
         headers = {
             "X-Source-URL": selected,
-            "Content-Disposition": 'attachment; filename="video.mp4"',
+            "Content-Disposition": f'attachment; filename="{filename}"',
         }
-        return Response(content=content, media_type="video/mp4", headers=headers)
+        return Response(content=content, media_type=media_type, headers=headers)
     except LocalResolveError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

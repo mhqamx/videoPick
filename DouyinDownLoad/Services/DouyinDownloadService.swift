@@ -53,10 +53,19 @@ actor DouyinDownloadService {
             videoInfo = try await resolveDouyinShortURL(url)
         }
 
-        log("resolved video id: \(videoInfo.id), download url: \(videoInfo.downloadURL.absoluteString)")
-        let localURL = try await downloadVideo(from: videoInfo.downloadURL, id: videoInfo.id, progress: progress)
-        videoInfo.localURL = localURL
-        log("parseAndDownload success, local file: \(localURL.path)")
+        log("resolved media id: \(videoInfo.id), type: \(videoInfo.mediaType.rawValue), download url: \(videoInfo.downloadURL.absoluteString)")
+
+        switch videoInfo.mediaType {
+        case .video:
+            let localURL = try await downloadVideo(from: videoInfo.downloadURL, id: videoInfo.id, progress: progress)
+            videoInfo.localURL = localURL
+            log("parseAndDownload video success, local file: \(localURL.path)")
+        case .images:
+            let localImages = try await downloadImages(urls: videoInfo.imageURLs, id: videoInfo.id, progress: progress)
+            videoInfo.localImageURLs = localImages
+            log("parseAndDownload images success, count: \(localImages.count)")
+        }
+
         return videoInfo
     }
 
@@ -69,6 +78,46 @@ actor DouyinDownloadService {
         return nil
         #else
         return try saveToDownloads(videoURL: videoURL)
+        #endif
+    }
+
+    /// 保存多张图片到相册
+    func saveImages(imageURLs: [URL]) async throws {
+        #if !targetEnvironment(macCatalyst)
+        log("saveImages start, count: \(imageURLs.count)")
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            throw DouyinDownloadError.noPermission
+        }
+
+        for (index, imageURL) in imageURLs.enumerated() {
+            guard let imageData = try? Data(contentsOf: imageURL),
+                  let image = UIImage(data: imageData) else {
+                log("saveImages[\(index)] failed to load image data")
+                continue
+            }
+
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                } completionHandler: { success, error in
+                    if success {
+                        self.log("saveImages[\(index)] success")
+                        continuation.resume()
+                    } else {
+                        let errorMsg = error?.localizedDescription ?? "未知错误"
+                        self.log("saveImages[\(index)] failed: \(errorMsg)")
+                        continuation.resume(throwing: DouyinDownloadError.saveFailed(reason: errorMsg))
+                    }
+                }
+            }
+        }
+        log("saveImages all done")
+        #else
+        // macOS: 保存到下载目录
+        for imageURL in imageURLs {
+            _ = try saveToDownloads(videoURL: imageURL)
+        }
         #endif
     }
 
@@ -182,6 +231,8 @@ actor DouyinDownloadService {
             let video_id: String?
             let download_url: String
             let formats: [BackendFormat]?
+            let media_type: String?
+            let image_urls: [String]?
         }
 
         struct BackendError: Codable {
@@ -226,12 +277,19 @@ actor DouyinDownloadService {
                     ?? extractVideoIDFromURL(decoded.webpage_url)
                     ?? "unknown_\(Int(Date().timeIntervalSince1970))"
 
+                let mediaType: MediaType = (decoded.media_type == "image") ? .images : .video
+                let imageURLs: [URL] = (decoded.image_urls ?? []).compactMap { urlStr in
+                    normalizeBackendDownloadURL(rawDownloadURL: urlStr, backendResolveURL: backendResolveURL)
+                }
+
                 let info = DouyinVideoInfo(
                     id: resolvedID,
                     downloadURL: resolvedDownloadURL,
                     localURL: nil,
                     title: decoded.title,
-                    coverURL: nil
+                    coverURL: nil,
+                    mediaType: mediaType,
+                    imageURLs: imageURLs
                 )
                 return info
             } catch {
@@ -528,6 +586,63 @@ actor DouyinDownloadService {
         }
     }
 
+
+    /// 下载多张图片，返回本地路径列表
+    func downloadImages(urls: [URL], id: String, progress: @Sendable (Double) -> Void = { _ in }) async throws -> [URL] {
+        guard !urls.isEmpty else { return [] }
+        log("downloadImages start, id: \(id), count: \(urls.count)")
+
+        var localURLs: [URL] = []
+        let total = Double(urls.count)
+
+        for (index, url) in urls.enumerated() {
+            try Task.checkCancellation()
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 30
+            request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+            request.addValue("*/*", forHTTPHeaderField: "Accept")
+            request.addValue("https://www.douyin.com/", forHTTPHeaderField: "Referer")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode),
+                  !data.isEmpty else {
+                log("downloadImages[\(index)] failed, status: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+                continue
+            }
+
+            // 根据 content-type 确定扩展名
+            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+            let ext: String
+            if contentType.contains("webp") {
+                ext = "webp"
+            } else if contentType.contains("png") {
+                ext = "png"
+            } else {
+                ext = "jpeg"
+            }
+
+            let fileName = "douyin_\(id)_\(index).\(ext)"
+            let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+            }
+            try data.write(to: fileURL)
+            localURLs.append(fileURL)
+
+            progress(Double(index + 1) / total)
+            log("downloadImages[\(index)] saved: \(fileURL.lastPathComponent), bytes: \(data.count)")
+        }
+
+        guard !localURLs.isEmpty else {
+            throw DouyinDownloadError.videoDataNotFound
+        }
+
+        return localURLs
+    }
 
     /// 下载视频（流式写入，支持进度回调）
     func downloadVideo(from url: URL, id: String, progress: @Sendable (Double) -> Void = { _ in }) async throws -> URL {
