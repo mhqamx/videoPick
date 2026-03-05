@@ -10,7 +10,7 @@ from ..local_resolver import LocalResolveError
 
 class KuaishouExtractor(BaseExtractor):
     platform = "kuaishou"
-    _CDN_HOSTS = ("kwimgs.com", "kwai.net", "kuaishou.com")
+    _CDN_HOSTS = ("kwimgs.com", "kwai.net", "kuaishou.com", "yximgs.com")
     _default_referer = "https://www.kuaishou.com/"
 
     _short_pattern = re.compile(r"https?://v\.kuaishou\.com/[a-zA-Z0-9_\-]+/?", re.I)
@@ -18,6 +18,7 @@ class KuaishouExtractor(BaseExtractor):
         r"https?://(?:www\.|m\.)?kuaishou\.com/(?:short-video|video)/[a-zA-Z0-9_\-]+",
         re.I,
     )
+    _ATLAS_PHOTO_TYPES = {"VERTICAL_ATLAS", "HORIZONTAL_ATLAS", "MULTI_IMAGE"}
 
     def extract_url(self, text: str) -> str | None:
         for pattern in (self._short_pattern, self._long_pattern):
@@ -43,6 +44,38 @@ class KuaishouExtractor(BaseExtractor):
             raise LocalResolveError(f"Kuaishou resolve failed: {exc}") from exc
 
         video_id = self._extract_video_id_from_url(webpage_url)
+        photo_id = self._extract_photo_id_from_url(webpage_url)
+
+        # 尝试通过 API 获取图文数据
+        if photo_id:
+            result = self._resolve_via_api(photo_id)
+            if result is not None:
+                title, media_type, image_urls, candidates = result
+                vid = video_id or photo_id or f"ks_unknown_{int(time.time())}"
+                if media_type == "image" and image_urls:
+                    return ResolvedVideo(
+                        platform=self.platform,
+                        input_url=url,
+                        webpage_url=webpage_url,
+                        title=title,
+                        video_id=vid,
+                        best_url=image_urls[0],
+                        candidates=[],
+                        media_type="image",
+                        image_urls=image_urls,
+                    )
+                if candidates:
+                    return ResolvedVideo(
+                        platform=self.platform,
+                        input_url=url,
+                        webpage_url=webpage_url,
+                        title=title,
+                        video_id=vid,
+                        best_url=candidates[0],
+                        candidates=candidates,
+                    )
+
+        # 回退到 HTML 解析
         title, candidates = self._parse_html(html)
 
         if not candidates:
@@ -68,6 +101,66 @@ class KuaishouExtractor(BaseExtractor):
     def _extract_video_id_from_url(url: str) -> str | None:
         m = re.search(r"/(?:short-video|video)/([a-zA-Z0-9_\-]+)", url)
         return m.group(1) if m else None
+
+    @staticmethod
+    def _extract_photo_id_from_url(url: str) -> str | None:
+        """从重定向后的 URL 提取 photoId（如 /fw/photo/{id} 或查询参数）。"""
+        m = re.search(r"/(?:fw/)?photo/([a-zA-Z0-9_\-]+)", url)
+        if m:
+            return m.group(1)
+        m = re.search(r"photoId=([a-zA-Z0-9_\-]+)", url)
+        return m.group(1) if m else None
+
+    def _resolve_via_api(
+        self, photo_id: str
+    ) -> tuple[str | None, str, list[str], list[str]] | None:
+        """调用快手 API 获取图文/视频数据。
+
+        返回 (title, media_type, image_urls, video_candidates) 或 None。
+        """
+        api_url = "https://v.m.chenzhongtech.com/rest/wd/ugH5App/photo/simple/info"
+        headers = self.default_http_headers(self._default_referer) | {
+            "Content-Type": "application/json",
+        }
+        try:
+            resp = resolve_client.post(
+                api_url, json={"photoId": photo_id, "kpn": "KUAISHOU"}, headers=headers
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if data.get("result") != 1:
+                return None
+        except Exception:
+            return None
+
+        photo = data.get("photo") or {}
+        title = photo.get("caption")
+        photo_type = photo.get("photoType", "")
+
+        # 图文作品：从 atlas 提取图片 URL
+        atlas = data.get("atlas") or {}
+        cdn_list = atlas.get("cdnList") or []
+        img_list = atlas.get("list") or []
+
+        if photo_type in self._ATLAS_PHOTO_TYPES and cdn_list and img_list:
+            cdn = cdn_list[0].get("cdn", "")
+            image_urls = [f"https://{cdn}{path}" for path in img_list if path]
+            if image_urls:
+                return title, "image", image_urls, []
+
+        # 视频作品：从 mainMvUrls 提取
+        main_mv_urls = photo.get("mainMvUrls") or []
+        video_candidates = []
+        for item in main_mv_urls:
+            url = item.get("url") if isinstance(item, dict) else None
+            if isinstance(url, str) and url.startswith("http"):
+                video_candidates.append(url)
+
+        if video_candidates:
+            return title, "video", [], video_candidates
+
+        return None
 
     def _parse_html(self, html: str) -> tuple[str | None, list[str]]:
         """三级回退解析快手 HTML 页面，返回 (title, candidate_urls)。"""
