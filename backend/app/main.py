@@ -14,7 +14,7 @@ from .extractors.base import close_shared_clients
 
 _ALLOWED_CDN_HOSTS = (
     "douyin.com", "iesdouyin.com", "douyinpic.com", "douyinvod.com",
-    "douyincdn.com", "byteimg.com",
+    "douyincdn.com", "byteimg.com", "snssdk.com",
     "tiktok.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktokv.com",
     "byteoversea.com", "ibytedtos.com", "muscdn.com",
     "instagram.com", "cdninstagram.com", "fbcdn.net",
