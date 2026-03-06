@@ -90,7 +90,7 @@ Instagram 解析默认读取以下 cookie 文件：
 也可以通过环境变量覆盖路径：
 
 ```bash
-export INSTAGRAM_COOKIE_FILE="/Users/maxiao/Downloads/www.instagram.com_cookies.txt"
+export INSTAGRAM_COOKIE_FILE="$PWD/backend/cookies/www.instagram.com_cookies.txt"
 ```
 
 说明：
@@ -107,7 +107,7 @@ X 解析默认读取以下 cookie 文件：
 也可以通过环境变量覆盖路径：
 
 ```bash
-export X_COOKIE_FILE="/Users/maxiao/Downloads/x.com_cookies.txt"
+export X_COOKIE_FILE="$PWD/backend/cookies/x.com_cookies.txt"
 ```
 
 说明：

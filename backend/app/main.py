@@ -30,7 +30,14 @@ def _is_allowed_source(url: str) -> bool:
         host = (urlparse(url).hostname or "").lower()
     except Exception:
         return False
-    return any(host == d or host.endswith("." + d) for d in _ALLOWED_CDN_HOSTS)
+    if any(host == d or host.endswith("." + d) for d in _ALLOWED_CDN_HOSTS):
+        return True
+
+    # B站部分源站会返回 upos-*.akamaized.net；仅放行 upos 前缀，避免放开整个 akamaized.net。
+    if host.startswith("upos-") and host.endswith(".akamaized.net"):
+        return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------

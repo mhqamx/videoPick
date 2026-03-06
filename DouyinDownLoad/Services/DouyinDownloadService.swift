@@ -21,7 +21,7 @@ import AppKit
 actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
     private let backendResolveURLs: [URL] = [
-        URL(string: "http://127.0.0.1:8000/resolve")!,
+//        URL(string: "http://127.0.0.1:8000/resolve")!,
         URL(string: "http://192.168.1.100:8000/resolve")!,
         URL(string: "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve")!,
     ]
@@ -39,18 +39,37 @@ actor DouyinDownloadService {
         log("parseAndDownload start, input length: \(text.count)")
         var videoInfo: DouyinVideoInfo
 
-        do {
-            videoInfo = try await resolveViaBackend(text: text)
-            log("resolve via backend success")
-        } catch {
-            let backendErrorMessage = error.localizedDescription
-            log("resolve via backend failed: \(backendErrorMessage), fallback to local parser")
-            let url = try extractURL(from: text)
-            log("extracted url: \(url.absoluteString)")
-            guard isDouyinURL(url) else {
-                throw DouyinDownloadError.backendResolveFailed(reason: "当前链接仅支持服务端解析，请检查 backend 服务是否可用")
+        // 提取 URL 判断平台，抖音链接优先本地解析避免 backend 超时等待
+        let extractedURL = try? extractURL(from: text)
+        let isDouyin = extractedURL.map { isDouyinURL($0) } ?? false
+
+        if isDouyin {
+            log("detected douyin URL, try local parser first")
+            do {
+                videoInfo = try await resolveDouyinShortURL(extractedURL!)
+                log("local douyin resolve success")
+            } catch {
+                log("local douyin resolve failed: \(error.localizedDescription), fallback to backend")
+                do {
+                    videoInfo = try await resolveViaBackend(text: text)
+                    log("resolve via backend success")
+                } catch {
+                    throw error
+                }
             }
-            videoInfo = try await resolveDouyinShortURL(url)
+        } else {
+            do {
+                videoInfo = try await resolveViaBackend(text: text)
+                log("resolve via backend success")
+            } catch {
+                let backendErrorMessage = error.localizedDescription
+                log("resolve via backend failed: \(backendErrorMessage)")
+                if let url = extractedURL, isDouyinURL(url) {
+                    videoInfo = try await resolveDouyinShortURL(url)
+                } else {
+                    throw DouyinDownloadError.backendResolveFailed(reason: "当前链接仅支持服务端解析，请检查 backend 服务是否可用")
+                }
+            }
         }
 
         log("resolved media id: \(videoInfo.id), type: \(videoInfo.mediaType.rawValue), download url: \(videoInfo.downloadURL.absoluteString)")
@@ -213,6 +232,7 @@ actor DouyinDownloadService {
     private func resolveViaBackend(text: String) async throws -> DouyinVideoInfo {
         struct BackendRequest: Codable {
             let text: String
+            let cookies: [String: [String: String]]?
         }
 
         struct BackendFormat: Codable {
@@ -248,7 +268,10 @@ actor DouyinDownloadService {
                 request.httpMethod = "POST"
                 request.timeoutInterval = 30
                 request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = try JSONEncoder().encode(BackendRequest(text: text))
+                let clientCookies = CookieStore.shared.allCookies()
+                request.httpBody = try JSONEncoder().encode(
+                    BackendRequest(text: text, cookies: clientCookies.isEmpty ? nil : clientCookies)
+                )
 
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse else {
@@ -653,11 +676,11 @@ actor DouyinDownloadService {
 
         for (index, candidate) in candidates.enumerated() {
             var request = URLRequest(url: candidate)
-            request.timeoutInterval = 60
-            request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+            // X 等平台大码率视频通过本地 backend 代理时首包可能超过 60s
+            request.timeoutInterval = 180
             request.addValue("*/*", forHTTPHeaderField: "Accept")
             request.addValue("bytes=0-", forHTTPHeaderField: "Range")
-            request.addValue("https://www.douyin.com/", forHTTPHeaderField: "Referer")
+            applyPlatformDownloadHeaders(to: &request, targetURL: candidate)
 
             do {
                 let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
@@ -741,6 +764,12 @@ actor DouyinDownloadService {
         let original = url.absoluteString
         append(original)
 
+        // backend 代理地址优先尝试原始 source，避免对 source 参数做二次拼接导致 URL 损坏
+        if let sourceURL = extractBackendProxySourceURL(from: url) {
+            append(sourceURL.absoluteString)
+            return result
+        }
+
         // 回退到有水印地址(部分视频仅该地址可用)
         append(original.replacingOccurrences(of: "/play/", with: "/playwm/"))
 
@@ -754,5 +783,63 @@ actor DouyinDownloadService {
         }
 
         return result
+    }
+
+    private func extractBackendProxySourceURL(from url: URL) -> URL? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.path.hasSuffix("/download"),
+              let source = components.queryItems?.first(where: { $0.name == "source" })?.value,
+              !source.isEmpty else {
+            return nil
+        }
+
+        if let direct = URL(string: source) {
+            return direct
+        }
+        if let decoded = source.removingPercentEncoding,
+           let direct = URL(string: decoded) {
+            return direct
+        }
+        return nil
+    }
+
+    private func applyPlatformDownloadHeaders(to request: inout URLRequest, targetURL: URL) {
+        let host = targetURL.host?.lowercased() ?? ""
+
+        // 默认值
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue("https://www.douyin.com/", forHTTPHeaderField: "Referer")
+
+        // B站/UPOS 直链
+        if host.contains("bilibili") || host.contains("bilivideo") || host.contains("upos") || host.hasSuffix(".akamaized.net") {
+            request.setValue(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                forHTTPHeaderField: "User-Agent"
+            )
+            request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+            return
+        }
+
+        // Instagram 直链
+        if host.contains("instagram.com") || host.contains("cdninstagram.com") || host.contains("fbcdn.net") {
+            request.setValue("https://www.instagram.com/", forHTTPHeaderField: "Referer")
+            let cookies = CookieStore.shared.cookies(for: "instagram")
+            if !cookies.isEmpty {
+                request.setValue(cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+            }
+            return
+        }
+
+        // X 直链
+        if host.contains("x.com") || host.contains("twitter.com") || host.contains("twimg.com") {
+            request.setValue("https://x.com/", forHTTPHeaderField: "Referer")
+            let cookies = CookieStore.shared.cookies(for: "x")
+            if !cookies.isEmpty {
+                request.setValue(cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+            }
+        }
     }
 }

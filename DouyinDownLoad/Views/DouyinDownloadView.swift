@@ -152,6 +152,7 @@ struct DouyinDownloadView: View {
     @StateObject private var viewModel = DouyinDownloadViewModel()
     @State private var selectedImageIndex: Int = 0
     @State private var showFullscreenImage = false
+    @State private var showCookieSettings = false
 
     #if targetEnvironment(macCatalyst)
     private let isMac = true
@@ -187,6 +188,18 @@ struct DouyinDownloadView: View {
             }
             .navigationTitle("短视频下载")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showCookieSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
+            .sheet(isPresented: $showCookieSettings) {
+                CookieSettingsView()
+            }
         }
     }
 
@@ -196,6 +209,18 @@ struct DouyinDownloadView: View {
         HStack(spacing: 0) {
             // 左栏：输入 + 控制
             VStack(spacing: 24) {
+                HStack {
+                    Spacer()
+                    Button {
+                        showCookieSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .sheet(isPresented: $showCookieSettings) {
+                        CookieSettingsView()
+                    }
+                }
+
                 headerView
 
                 inputSection

@@ -115,7 +115,7 @@ Instagram Extractor 默认读取：
 可通过环境变量覆盖：
 
 ```bash
-export INSTAGRAM_COOKIE_FILE="/Users/maxiao/Downloads/www.instagram.com_cookies.txt"
+export INSTAGRAM_COOKIE_FILE="$PWD/cookies/www.instagram.com_cookies.txt"
 ```
 
 要求：
@@ -132,7 +132,7 @@ X Extractor 默认读取：
 可通过环境变量覆盖：
 
 ```bash
-export X_COOKIE_FILE="/Users/maxiao/Downloads/x.com_cookies.txt"
+export X_COOKIE_FILE="$PWD/cookies/x.com_cookies.txt"
 ```
 
 要求：
