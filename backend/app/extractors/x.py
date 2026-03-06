@@ -48,7 +48,7 @@ class XExtractor(BaseExtractor):
             return False
         return any(host == d or host.endswith("." + d) for d in self._CDN_HOSTS)
 
-    def resolve(self, text: str) -> ResolvedVideo:
+    def resolve(self, text: str, client_cookies: dict[str, str] | None = None) -> ResolvedVideo:
         url = self.extract_url(text)
         if not url:
             raise LocalResolveError("No X/Twitter URL found in input")
@@ -57,7 +57,7 @@ class XExtractor(BaseExtractor):
         if not tweet_id:
             raise LocalResolveError("Could not extract tweet ID from URL")
 
-        cookies = self._load_x_cookies()
+        cookies = client_cookies if client_cookies else self._load_x_cookies()
         query_id, bearer_token = self._load_graphql_metadata(tweet_id=tweet_id)
         title, candidates = self._resolve_video_variants(
             tweet_id=tweet_id,

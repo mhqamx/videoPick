@@ -30,14 +30,15 @@ class ExtractorRegistry:
             XiaohongshuExtractor(),
         ]
 
-    def resolve(self, text: str) -> ResolvedVideo:
+    def resolve(self, text: str, client_cookies: dict[str, dict[str, str]] | None = None) -> ResolvedVideo:
         last_error: Exception | None = None
         for extractor in self.extractors:
             try:
                 url = extractor.extract_url(text)
                 if not url:
                     continue
-                return extractor.resolve(text)
+                platform_cookies = (client_cookies or {}).get(extractor.platform)
+                return extractor.resolve(text, client_cookies=platform_cookies)
             except (LocalResolveError, httpx.HTTPError, json.JSONDecodeError) as exc:
                 logger.warning("Extractor %s failed: %s", extractor.platform, exc)
                 last_error = exc

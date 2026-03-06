@@ -37,7 +37,7 @@ class VideoExtractor(Protocol):
     def can_handle_source(self, source_url: str) -> bool:
         ...
 
-    def resolve(self, text: str) -> ResolvedVideo:
+    def resolve(self, text: str, client_cookies: dict[str, str] | None = None) -> ResolvedVideo:
         ...
 
     def download_bytes(self, source_url: str) -> tuple[bytes, str]:

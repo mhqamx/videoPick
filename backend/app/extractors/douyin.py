@@ -31,7 +31,7 @@ class DouyinExtractor(BaseExtractor):
                 return candidate
         return None
 
-    def resolve(self, text: str) -> ResolvedVideo:
+    def resolve(self, text: str, client_cookies: dict[str, str] | None = None) -> ResolvedVideo:
         url = self.extract_url(text)
         if not url:
             raise LocalResolveError("No Douyin URL found in input")

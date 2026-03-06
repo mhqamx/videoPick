@@ -55,7 +55,7 @@ class BilibiliExtractor(BaseExtractor):
             return False
         return any(k in host for k in self._source_host_keywords)
 
-    def resolve(self, text: str) -> ResolvedVideo:
+    def resolve(self, text: str, client_cookies: dict[str, str] | None = None) -> ResolvedVideo:
         url = self.extract_url(text)
         if not url:
             raise LocalResolveError("No Bilibili URL found in input")

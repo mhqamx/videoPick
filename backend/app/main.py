@@ -55,7 +55,7 @@ def health() -> dict[str, str]:
 @app.post("/resolve", response_model=ResolveResponse)
 def resolve(req: ResolveRequest, request: Request) -> ResolveResponse:
     try:
-        resolved = registry.resolve(req.text)
+        resolved = registry.resolve(req.text, client_cookies=req.cookies)
         base = str(request.base_url)
         proxy_url = build_proxy_download_url(base, resolved.best_url)
 

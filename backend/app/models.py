@@ -3,6 +3,10 @@ from pydantic import BaseModel, Field
 
 class ResolveRequest(BaseModel):
     text: str = Field(..., description="Douyin share text or URL")
+    cookies: dict[str, dict[str, str]] | None = Field(
+        None,
+        description='Client-provided cookies keyed by platform, e.g. {"instagram": {"sessionid": "..."}}',
+    )
 
 
 class VideoFormat(BaseModel):

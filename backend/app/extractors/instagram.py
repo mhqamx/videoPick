@@ -53,12 +53,12 @@ class InstagramExtractor(BaseExtractor):
             return False
         return any(host == d or host.endswith("." + d) for d in self._CDN_HOSTS)
 
-    def resolve(self, text: str) -> ResolvedVideo:
+    def resolve(self, text: str, client_cookies: dict[str, str] | None = None) -> ResolvedVideo:
         url = self.extract_url(text)
         if not url:
             raise LocalResolveError("No Instagram URL found in input")
 
-        cookie_jar = self._load_instagram_cookies()
+        cookie_jar = client_cookies if client_cookies else self._load_instagram_cookies()
         normalized_url = self._normalize_input_url(url)
         title = None
         video_candidates: list[str] = []
