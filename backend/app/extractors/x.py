@@ -15,6 +15,7 @@ class XExtractor(BaseExtractor):
     platform = "x"
     _CDN_HOSTS = (
         "video.twimg.com",
+        "pbs.twimg.com",
         "twimg.com",
         "x.com",
         "twitter.com",
@@ -59,25 +60,40 @@ class XExtractor(BaseExtractor):
 
         cookies = client_cookies if client_cookies else self._load_x_cookies()
         query_id, bearer_token = self._load_graphql_metadata(tweet_id=tweet_id)
-        title, candidates = self._resolve_video_variants(
+        title, candidates, image_urls = self._resolve_video_variants(
             tweet_id=tweet_id,
             query_id=query_id,
             bearer_token=bearer_token,
             cookies=cookies,
         )
 
-        if not candidates:
-            raise LocalResolveError("No video link found in X tweet")
+        # 视频推文
+        if candidates:
+            return ResolvedVideo(
+                platform=self.platform,
+                input_url=url,
+                webpage_url=f"https://x.com/i/status/{tweet_id}",
+                title=title,
+                video_id=tweet_id,
+                best_url=candidates[0],
+                candidates=candidates,
+            )
 
-        return ResolvedVideo(
-            platform=self.platform,
-            input_url=url,
-            webpage_url=f"https://x.com/i/status/{tweet_id}",
-            title=title,
-            video_id=tweet_id,
-            best_url=candidates[0],
-            candidates=candidates,
-        )
+        # 图片推文
+        if image_urls:
+            return ResolvedVideo(
+                platform=self.platform,
+                input_url=url,
+                webpage_url=f"https://x.com/i/status/{tweet_id}",
+                title=title,
+                video_id=tweet_id,
+                best_url=image_urls[0],
+                candidates=[],
+                media_type="image",
+                image_urls=image_urls,
+            )
+
+        raise LocalResolveError("No media found in X tweet")
 
     def download_bytes(self, source_url: str) -> tuple[bytes, str]:
         cookies = self._load_x_cookies(allow_missing=True)
@@ -188,7 +204,7 @@ class XExtractor(BaseExtractor):
         query_id: str,
         bearer_token: str,
         cookies: dict[str, str],
-    ) -> tuple[str | None, list[str]]:
+    ) -> tuple[str | None, list[str], list[str]]:
         variables = {
             "tweetId": tweet_id,
             "withCommunity": False,
@@ -228,10 +244,10 @@ class XExtractor(BaseExtractor):
                     continue
                 resp.raise_for_status()
                 payload = resp.json()
-                title, candidates = self._extract_video_candidates_from_graphql(payload)
-                if candidates:
-                    return title, candidates
-                last_error = "no mp4 variants in graphql response"
+                title, candidates, image_urls = self._extract_media_from_graphql(payload)
+                if candidates or image_urls:
+                    return title, candidates, image_urls
+                last_error = "no media in graphql response"
             except Exception as exc:
                 last_error = str(exc)
                 continue
@@ -275,10 +291,12 @@ class XExtractor(BaseExtractor):
         self._metadata_cache = (query_id, bearer, now)
         return query_id, bearer
 
-    def _extract_video_candidates_from_graphql(self, payload: object) -> tuple[str | None, list[str]]:
+    def _extract_media_from_graphql(self, payload: object) -> tuple[str | None, list[str], list[str]]:
+        """返回 (title, video_candidates, image_urls)"""
         title: str | None = None
         mp4s: list[tuple[int, str]] = []
         others: list[str] = []
+        image_urls: list[str] = []
 
         def walk(node: object) -> None:
             nonlocal title
@@ -302,6 +320,12 @@ class XExtractor(BaseExtractor):
                         elif ".m3u8" in url:
                             others.append(url)
 
+                # 图片推文: type == "photo" 的 media_url_https
+                if node.get("type") == "photo":
+                    media_url = node.get("media_url_https")
+                    if isinstance(media_url, str) and "pbs.twimg.com" in media_url:
+                        image_urls.append(media_url)
+
                 # 一些推文视频在 unified_card.string_value(JSON 字符串) 里
                 if node.get("key") == "unified_card" and isinstance(node.get("value"), dict):
                     string_value = node["value"].get("string_value")
@@ -322,7 +346,7 @@ class XExtractor(BaseExtractor):
 
         mp4s_sorted = [url for _, url in sorted(mp4s, key=lambda x: x[0], reverse=True)]
         candidates = list(dict.fromkeys(mp4s_sorted + others))
-        return title, candidates
+        return title, candidates, list(dict.fromkeys(image_urls))
 
     @staticmethod
     def _extract_tweet_id(url: str) -> str | None:

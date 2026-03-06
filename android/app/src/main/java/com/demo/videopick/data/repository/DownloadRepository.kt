@@ -67,6 +67,13 @@ class DownloadRepository(private val context: Context) {
         .followRedirects(true)
         .build()
 
+    private val kuaishouLocalClient = resolveClient.newBuilder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
     @Volatile
     private var xMetadataCache: Triple<String, String, Long>? = null
 
@@ -113,6 +120,12 @@ class DownloadRepository(private val context: Context) {
     private val xMainJsPattern = Regex(
         """https://abs\.twimg\.com/responsive-web/client-web/main\.[^"']+\.js""",
         RegexOption.IGNORE_CASE
+    )
+    private val kuaishouShortPattern = Regex(
+        """https?://v\.kuaishou\.com/[a-zA-Z0-9_\-]+/?""", RegexOption.IGNORE_CASE
+    )
+    private val kuaishouLongPattern = Regex(
+        """https?://(?:www\.|m\.)?kuaishou\.com/(?:short-video|video)/[a-zA-Z0-9_\-]+""", RegexOption.IGNORE_CASE
     )
     private val genericUrlPattern = Regex("""https?://[^\s]+""", RegexOption.IGNORE_CASE)
     private val instagramDesktopUA = (
@@ -205,6 +218,19 @@ class DownloadRepository(private val context: Context) {
         }
     }
 
+    private fun extractKuaishouUrl(text: String): String? {
+        for (pattern in listOf(kuaishouShortPattern, kuaishouLongPattern)) {
+            val matched = pattern.find(text)?.value
+            if (!matched.isNullOrBlank()) return cleanupExtractedUrl(matched)
+        }
+        val candidate = genericUrlPattern.find(text)?.value?.let(::cleanupExtractedUrl)
+        if (!candidate.isNullOrBlank()) {
+            val lowered = candidate.lowercase()
+            if ("kuaishou.com" in lowered) return candidate
+        }
+        return null
+    }
+
     private fun logD(msg: String) = Log.d(TAG, msg)
     private fun logW(msg: String) = Log.w(TAG, msg)
     private fun logE(msg: String, t: Throwable? = null) = Log.e(TAG, msg, t)
@@ -223,7 +249,8 @@ class DownloadRepository(private val context: Context) {
         val instagramUrl = extractInstagramUrl(text)
         val xUrl = extractXUrl(text)
         val xhsUrl = extractXiaohongshuUrl(text)
-        logD("parse.detect douyinUrl=${douyinUrl ?: "null"} instagramUrl=${instagramUrl ?: "null"} xUrl=${xUrl ?: "null"} xhsUrl=${xhsUrl ?: "null"}")
+        val kuaishouUrl = extractKuaishouUrl(text)
+        logD("parse.detect douyinUrl=${douyinUrl ?: "null"} instagramUrl=${instagramUrl ?: "null"} xUrl=${xUrl ?: "null"} xhsUrl=${xhsUrl ?: "null"} kuaishouUrl=${kuaishouUrl ?: "null"}")
         var resolvePath = "unknown"
         val videoInfo = when {
             douyinUrl != null -> {
@@ -284,6 +311,26 @@ class DownloadRepository(private val context: Context) {
                         logE("parse.fail both_local_and_backend platform=xiaohongshu", backendErr)
                         throw Exception(
                             "小红书本地解析失败: ${localErr.message ?: "未知错误"}；服务端解析失败: ${backendErr.message ?: "未知错误"}"
+                        )
+                    }
+                }
+            }
+            kuaishouUrl != null -> {
+                logD("parse.route platform=kuaishou strategy=local_first")
+                try {
+                    val info = resolveKuaishouLocally(kuaishouUrl)
+                    resolvePath = "local:kuaishou"
+                    info
+                } catch (localErr: Exception) {
+                    logW("parse.fallback platform=kuaishou reason=${localErr.message}")
+                    try {
+                        val info = resolveViaBackend(text)
+                        resolvePath = "backend_after_local_fail:kuaishou"
+                        info
+                    } catch (backendErr: Exception) {
+                        logE("parse.fail both_local_and_backend platform=kuaishou", backendErr)
+                        throw Exception(
+                            "快手本地解析失败: ${localErr.message ?: "未知错误"}；服务端解析失败: ${backendErr.message ?: "未知错误"}"
                         )
                     }
                 }
@@ -433,19 +480,31 @@ class DownloadRepository(private val context: Context) {
                     val videoInfoRes = data["videoInfoRes"] as? JsonObject ?: continue
                     val itemList = videoInfoRes["item_list"] as? JsonArray ?: continue
                     val firstItem = itemList.firstOrNull() as? JsonObject ?: continue
+                    // 图文作品优先检测
+                    if (isDouyinImagePost(firstItem)) {
+                        val info = buildImageInfoFromItem(firstItem)
+                        if (info != null) return info
+                    }
                     val info = buildVideoInfoFromItem(firstItem)
                     if (info != null) return info
                 }
             }
 
-            // 策略2: 递归查找包含 "video" 键的字典
+            // 策略2: 先尝试图文
+            val imagesDict = findFirstObject(root, "images")
+            if (imagesDict != null && isDouyinImagePost(imagesDict)) {
+                val info = buildImageInfoFromItem(imagesDict)
+                if (info != null) return info
+            }
+
+            // 策略3: 递归查找包含 "video" 键的字典
             val awemeDict = findFirstObject(root, "video")
             if (awemeDict != null) {
                 val info = buildVideoInfoFromItem(awemeDict)
                 if (info != null) return info
             }
 
-            // 策略3: 递归查找 play_addr.url_list
+            // 策略4: 递归查找 play_addr.url_list
             val videoUrl = findBestVideoUrl(root)
             if (videoUrl != null) {
                 val title = findFirstString(root, "desc")
@@ -461,6 +520,53 @@ class DownloadRepository(private val context: Context) {
         } catch (_: Exception) {
             return null
         }
+    }
+
+    private fun isDouyinImagePost(item: JsonObject): Boolean {
+        val awemeType = jsonPrimitiveContent(item["aweme_type"])
+        if (awemeType == "2") return true
+        val images = item["images"] as? JsonArray
+        return images != null && images.isNotEmpty()
+    }
+
+    private fun buildImageInfoFromItem(item: JsonObject): VideoInfo? {
+        val images = item["images"] as? JsonArray ?: return null
+        if (images.isEmpty()) return null
+
+        val imageUrls = mutableListOf<String>()
+        for (imgElement in images) {
+            val img = imgElement as? JsonObject ?: continue
+            val urlList = img["url_list"] as? JsonArray ?: continue
+            if (urlList.isEmpty()) continue
+            // 优先选 jpeg/jpg，其次任意可用 URL
+            var chosen: String? = null
+            for (uElement in urlList) {
+                val u = (uElement as? JsonPrimitive)?.content ?: continue
+                if (u.isBlank()) continue
+                if (chosen == null) chosen = u
+                val lower = u.lowercase()
+                if ("jpeg" in lower || "jpg" in lower) {
+                    chosen = u
+                    break
+                }
+            }
+            if (!chosen.isNullOrBlank()) imageUrls.add(chosen)
+        }
+
+        if (imageUrls.isEmpty()) return null
+
+        val awemeId = jsonPrimitiveContent(item["aweme_id"]) ?: "unknown_${System.currentTimeMillis()}"
+        val title = jsonPrimitiveContent(item["desc"])
+
+        logD("local.douyin.image awemeId=$awemeId imageCount=${imageUrls.size}")
+
+        return VideoInfo(
+            id = awemeId,
+            downloadUrl = imageUrls.first(),
+            title = title,
+            mediaType = MediaType.IMAGES,
+            imageUrls = imageUrls,
+        )
     }
 
     private fun buildVideoInfoFromItem(item: JsonObject): VideoInfo? {
@@ -937,24 +1043,40 @@ class DownloadRepository(private val context: Context) {
 
         val tweetId = extractXTweetId(normalizedUrl) ?: throw Exception("无法从链接中提取 tweet id")
         val (queryId, bearer) = loadXGraphqlMetadata(tweetId, cookies)
-        val (title, candidates) = resolveXVideoVariants(tweetId, queryId, bearer, cookies)
-        if (candidates.isEmpty()) throw Exception("X 推文中未找到可下载视频链接")
+        val result = resolveXMedia(tweetId, queryId, bearer, cookies)
 
-        logD("local.x.success id=$tweetId candidateCount=${candidates.size} costMs=${System.currentTimeMillis() - start}")
-        return VideoInfo(
-            id = tweetId,
-            downloadUrl = candidates.first(),
-            title = title,
-            mediaType = MediaType.VIDEO,
-        )
+        // 视频推文
+        if (result.videoCandidates.isNotEmpty()) {
+            logD("local.x.success media=video id=$tweetId candidateCount=${result.videoCandidates.size} costMs=${System.currentTimeMillis() - start}")
+            return VideoInfo(
+                id = tweetId,
+                downloadUrl = result.videoCandidates.first(),
+                title = result.title,
+                mediaType = MediaType.VIDEO,
+            )
+        }
+
+        // 图片推文
+        if (result.imageUrls.isNotEmpty()) {
+            logD("local.x.success media=image id=$tweetId imageCount=${result.imageUrls.size} costMs=${System.currentTimeMillis() - start}")
+            return VideoInfo(
+                id = tweetId,
+                downloadUrl = result.imageUrls.first(),
+                title = result.title,
+                mediaType = MediaType.IMAGES,
+                imageUrls = result.imageUrls,
+            )
+        }
+
+        throw Exception("X 推文中未找到可下载媒体")
     }
 
-    private fun resolveXVideoVariants(
+    private fun resolveXMedia(
         tweetId: String,
         queryId: String,
         bearerToken: String,
         cookies: Map<String, String>,
-    ): Pair<String?, List<String>> {
+    ): XMediaResult {
         val variables = """{"tweetId":"$tweetId","withCommunity":false,"includePromotedContent":false,"withVoice":true}"""
         val features =
             """{"responsive_web_graphql_exclude_directive_enabled":true,"longform_notetweets_inline_media_enabled":true,"responsive_web_media_download_video_enabled":true,"tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled":true}"""
@@ -991,12 +1113,12 @@ class DownloadRepository(private val context: Context) {
                         logW("local.x.graphql.try[$attempt] unavailable=$unavailable")
                         return@use
                     }
-                    val parsed = extractXVideoCandidatesFromGraphql(payload)
-                    if (parsed.second.isNotEmpty()) {
-                        logD("local.x.graphql.success try[$attempt] status=${response.code} candidates=${parsed.second.size}")
+                    val parsed = extractXMediaFromGraphql(payload)
+                    if (parsed.videoCandidates.isNotEmpty() || parsed.imageUrls.isNotEmpty()) {
+                        logD("local.x.graphql.success try[$attempt] status=${response.code} videos=${parsed.videoCandidates.size} images=${parsed.imageUrls.size}")
                         return parsed
                     }
-                    lastError = "no mp4 variants in graphql response"
+                    lastError = "no media in graphql response"
                     logW("local.x.graphql.try[$attempt] no candidates")
                 }
             } catch (e: Exception) {
@@ -1095,10 +1217,17 @@ class DownloadRepository(private val context: Context) {
             .find(js)
             ?.value
 
-    private fun extractXVideoCandidatesFromGraphql(payload: JsonElement): Pair<String?, List<String>> {
+    private data class XMediaResult(
+        val title: String? = null,
+        val videoCandidates: List<String> = emptyList(),
+        val imageUrls: List<String> = emptyList(),
+    )
+
+    private fun extractXMediaFromGraphql(payload: JsonElement): XMediaResult {
         var title: String? = null
         val mp4s = mutableListOf<Pair<Int, String>>()
         val others = mutableListOf<String>()
+        val imageUrls = mutableListOf<String>()
 
         fun walk(node: JsonElement?) {
             when (node) {
@@ -1121,6 +1250,15 @@ class DownloadRepository(private val context: Context) {
                         }
                     }
 
+                    // 图片推文: type == "photo" 的 media_url_https
+                    val mediaType = jsonPrimitiveContent(node["type"])
+                    if (mediaType == "photo") {
+                        val mediaUrl = jsonPrimitiveContent(node["media_url_https"])
+                        if (!mediaUrl.isNullOrBlank() && "pbs.twimg.com" in mediaUrl) {
+                            imageUrls.add(mediaUrl)
+                        }
+                    }
+
                     if (jsonPrimitiveContent(node["key"]) == "unified_card") {
                         val value = node["value"] as? JsonObject
                         val stringValue = jsonPrimitiveContent(value?.get("string_value"))
@@ -1139,7 +1277,11 @@ class DownloadRepository(private val context: Context) {
 
         walk(payload)
         val sortedMp4 = mp4s.sortedByDescending { it.first }.map { it.second }
-        return title to dedupe(sortedMp4 + others)
+        return XMediaResult(
+            title = title,
+            videoCandidates = dedupe(sortedMp4 + others),
+            imageUrls = dedupe(imageUrls),
+        )
     }
 
     private fun extractXTweetUnavailableReason(payload: JsonElement): String? {
@@ -1359,6 +1501,296 @@ class DownloadRepository(private val context: Context) {
     private fun dedupe(urls: List<String>): List<String> = LinkedHashSet(urls).toList()
 
     // ---------------------------------------------------------------
+    // 快手本地解析
+    // ---------------------------------------------------------------
+
+    private val kuaishouAtlasPhotoTypes = setOf("VERTICAL_ATLAS", "HORIZONTAL_ATLAS", "MULTI_IMAGE")
+
+    private fun resolveKuaishouLocally(url: String): VideoInfo {
+        val start = System.currentTimeMillis()
+        logD("local.kuaishou.start url=$url")
+
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "zh-CN,zh-Hans;q=0.9")
+            .header("Referer", "https://www.kuaishou.com/")
+            .build()
+
+        kuaishouLocalClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw Exception("请求失败: HTTP ${response.code}")
+            val html = response.body?.string() ?: throw Exception("空响应")
+            val webpageUrl = response.request.url.toString()
+            logD("local.kuaishou.fetched status=${response.code} finalUrl=$webpageUrl htmlBytes=${html.length}")
+
+            val videoId = extractKuaishouVideoId(webpageUrl)
+            val photoId = extractKuaishouPhotoId(webpageUrl)
+
+            // 尝试通过 API 获取
+            if (photoId != null) {
+                val apiResult = resolveKuaishouViaApi(photoId)
+                if (apiResult != null) {
+                    val vid = videoId ?: photoId ?: "ks_unknown_${System.currentTimeMillis()}"
+                    if (apiResult.mediaType == MediaType.IMAGES && apiResult.imageUrls.isNotEmpty()) {
+                        logD("local.kuaishou.api.success media=image id=$vid imageCount=${apiResult.imageUrls.size} costMs=${System.currentTimeMillis() - start}")
+                        return VideoInfo(
+                            id = vid,
+                            downloadUrl = apiResult.imageUrls.first(),
+                            title = apiResult.title,
+                            mediaType = MediaType.IMAGES,
+                            imageUrls = apiResult.imageUrls,
+                        )
+                    }
+                    if (apiResult.videoCandidates.isNotEmpty()) {
+                        logD("local.kuaishou.api.success media=video id=$vid costMs=${System.currentTimeMillis() - start}")
+                        return VideoInfo(
+                            id = vid,
+                            downloadUrl = apiResult.videoCandidates.first(),
+                            title = apiResult.title,
+                            mediaType = MediaType.VIDEO,
+                        )
+                    }
+                }
+            }
+
+            // 回退到 HTML 解析
+            val parsed = parseKuaishouHtml(html)
+            if (parsed.videoCandidates.isEmpty()) {
+                throw Exception("No video link found in Kuaishou page")
+            }
+
+            val vid = videoId ?: "ks_unknown_${System.currentTimeMillis()}"
+            logD("local.kuaishou.html.success media=video id=$vid costMs=${System.currentTimeMillis() - start}")
+            return VideoInfo(
+                id = vid,
+                downloadUrl = parsed.videoCandidates.first(),
+                title = parsed.title,
+                mediaType = MediaType.VIDEO,
+            )
+        }
+    }
+
+    private data class KuaishouApiResult(
+        val title: String? = null,
+        val mediaType: MediaType = MediaType.VIDEO,
+        val imageUrls: List<String> = emptyList(),
+        val videoCandidates: List<String> = emptyList(),
+    )
+
+    private fun resolveKuaishouViaApi(photoId: String): KuaishouApiResult? {
+        val apiUrl = "https://v.m.chenzhongtech.com/rest/wd/ugH5App/photo/simple/info"
+        val bodyJson = """{"photoId":"$photoId","kpn":"KUAISHOU"}"""
+        val request = Request.Builder()
+            .url(apiUrl)
+            .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+            .header("Accept", "*/*")
+            .header("Referer", "https://www.kuaishou.com/")
+            .header("Content-Type", "application/json")
+            .post(bodyJson.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val responseBody = try {
+            kuaishouLocalClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    logW("local.kuaishou.api failed status=${response.code}")
+                    return null
+                }
+                response.body?.string()
+            }
+        } catch (e: Exception) {
+            logW("local.kuaishou.api exception=${e.message}")
+            return null
+        }
+
+        if (responseBody.isNullOrBlank()) return null
+
+        val root = try {
+            json.parseToJsonElement(responseBody) as? JsonObject
+        } catch (_: Exception) {
+            return null
+        } ?: return null
+
+        val result = jsonPrimitiveContent(root["result"])
+        if (result != "1") return null
+
+        val photo = root["photo"] as? JsonObject ?: return null
+        val title = jsonPrimitiveContent(photo["caption"])
+        val photoType = jsonPrimitiveContent(photo["photoType"]) ?: ""
+
+        // 图文作品：从 atlas 提取图片 URL
+        val atlas = root["atlas"] as? JsonObject
+        val cdnList = atlas?.get("cdnList") as? JsonArray
+        val imgList = atlas?.get("list") as? JsonArray
+
+        if (photoType in kuaishouAtlasPhotoTypes && cdnList != null && cdnList.isNotEmpty() && imgList != null && imgList.isNotEmpty()) {
+            val firstCdn = (cdnList.firstOrNull() as? JsonObject)
+            val cdn = jsonPrimitiveContent(firstCdn?.get("cdn")) ?: ""
+            if (cdn.isNotBlank()) {
+                val imageUrls = mutableListOf<String>()
+                for (pathElement in imgList) {
+                    val path = (pathElement as? JsonPrimitive)?.content
+                    if (!path.isNullOrBlank()) {
+                        imageUrls.add("https://$cdn$path")
+                    }
+                }
+                if (imageUrls.isNotEmpty()) {
+                    logD("local.kuaishou.api atlas photoType=$photoType imageCount=${imageUrls.size}")
+                    return KuaishouApiResult(
+                        title = title,
+                        mediaType = MediaType.IMAGES,
+                        imageUrls = imageUrls,
+                    )
+                }
+            }
+        }
+
+        // 视频作品：从 mainMvUrls 提取
+        val mainMvUrls = photo["mainMvUrls"] as? JsonArray
+        val videoCandidates = mutableListOf<String>()
+        if (mainMvUrls != null) {
+            for (item in mainMvUrls) {
+                val obj = item as? JsonObject ?: continue
+                val videoUrl = jsonPrimitiveContent(obj["url"])
+                if (!videoUrl.isNullOrBlank() && videoUrl.startsWith("http")) {
+                    videoCandidates.add(videoUrl)
+                }
+            }
+        }
+
+        if (videoCandidates.isNotEmpty()) {
+            logD("local.kuaishou.api video candidateCount=${videoCandidates.size}")
+            return KuaishouApiResult(
+                title = title,
+                mediaType = MediaType.VIDEO,
+                videoCandidates = videoCandidates,
+            )
+        }
+
+        return null
+    }
+
+    private data class KuaishouParsedMedia(
+        val title: String? = null,
+        val videoCandidates: List<String> = emptyList(),
+    )
+
+    private fun parseKuaishouHtml(html: String): KuaishouParsedMedia {
+        // 策略 1: window.__APOLLO_STATE__
+        val apollo = parseKuaishouApolloState(html)
+        if (apollo.videoCandidates.isNotEmpty()) return apollo
+
+        // 策略 2: window.__INITIAL_STATE__
+        val initial = parseKuaishouInitialState(html)
+        if (initial.videoCandidates.isNotEmpty()) {
+            return KuaishouParsedMedia(
+                title = initial.title ?: apollo.title,
+                videoCandidates = initial.videoCandidates,
+            )
+        }
+
+        // 策略 3: 原始 HTML 正则匹配 CDN URL
+        val rawCandidates = parseKuaishouRawHtml(html)
+        return KuaishouParsedMedia(title = apollo.title ?: initial.title, videoCandidates = rawCandidates)
+    }
+
+    private fun parseKuaishouApolloState(html: String): KuaishouParsedMedia {
+        val jsonStr = extractJsonAssignment(html, "window.__APOLLO_STATE__") ?: return KuaishouParsedMedia()
+
+        val root = try {
+            json.parseToJsonElement(jsonStr) as? JsonObject
+        } catch (_: Exception) {
+            null
+        } ?: return KuaishouParsedMedia()
+
+        var title: String? = null
+        val candidates = mutableListOf<String>()
+
+        for ((key, value) in root) {
+            val obj = value as? JsonObject ?: continue
+            if (!("Photo" in key || "Work" in key || "Video" in key)) continue
+            val videoUrl = jsonPrimitiveContent(obj["videoUrl"])
+                ?: jsonPrimitiveContent(obj["video_url"])
+            if (!videoUrl.isNullOrBlank() && videoUrl.startsWith("http")) {
+                if (title == null) {
+                    title = jsonPrimitiveContent(obj["caption"]) ?: jsonPrimitiveContent(obj["title"])
+                }
+                candidates.add(videoUrl)
+            }
+        }
+
+        return KuaishouParsedMedia(title = title, videoCandidates = dedupe(candidates))
+    }
+
+    private fun parseKuaishouInitialState(html: String): KuaishouParsedMedia {
+        val jsonStr = extractJsonAssignment(html, "window.__INITIAL_STATE__")
+            ?.replace("undefined", "null")
+            ?: return KuaishouParsedMedia()
+
+        val root = try {
+            json.parseToJsonElement(jsonStr)
+        } catch (_: Exception) {
+            return KuaishouParsedMedia()
+        }
+
+        var title: String? = null
+        val candidates = mutableListOf<String>()
+
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    for ((k, v) in node) {
+                        if (k in listOf("videoUrl", "video_url", "mp4Url") && v is JsonPrimitive) {
+                            val url = v.content
+                            if (url.startsWith("http")) candidates.add(url)
+                        } else if (k in listOf("caption", "title") && v is JsonPrimitive && title == null) {
+                            val text = v.content
+                            if (text.isNotBlank()) title = text
+                        } else {
+                            walk(v)
+                        }
+                    }
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> {}
+            }
+        }
+
+        walk(root)
+        return KuaishouParsedMedia(title = title, videoCandidates = dedupe(candidates))
+    }
+
+    private fun parseKuaishouRawHtml(html: String): List<String> {
+        val patterns = listOf(
+            Regex("""(https?:\\/\\/[^"']+kwimgs\.com[^"']*\.mp4[^"']*)""", RegexOption.IGNORE_CASE),
+            Regex("""(https?:\\/\\/[^"']+kwai\.net[^"']*\.mp4[^"']*)""", RegexOption.IGNORE_CASE),
+            Regex("""(https?://[^"']+kwimgs\.com[^"']*\.mp4[^"']*)""", RegexOption.IGNORE_CASE),
+            Regex("""(https?://[^"']+kwai\.net[^"']*\.mp4[^"']*)""", RegexOption.IGNORE_CASE),
+        )
+        val results = mutableListOf<String>()
+        for (pattern in patterns) {
+            for (m in pattern.findAll(html)) {
+                val raw = m.groupValues[1].replace("\\/", "/")
+                results.add(raw)
+            }
+        }
+        return dedupe(results)
+    }
+
+    private fun extractKuaishouVideoId(url: String): String? =
+        Regex("""/(?:short-video|video)/([a-zA-Z0-9_\-]+)""", RegexOption.IGNORE_CASE)
+            .find(url)
+            ?.groupValues
+            ?.getOrNull(1)
+
+    private fun extractKuaishouPhotoId(url: String): String? {
+        val m1 = Regex("""/(?:fw/)?photo/([a-zA-Z0-9_\-]+)""", RegexOption.IGNORE_CASE).find(url)
+        if (m1 != null) return m1.groupValues[1]
+        val m2 = Regex("""photoId=([a-zA-Z0-9_\-]+)""", RegexOption.IGNORE_CASE).find(url)
+        return m2?.groupValues?.getOrNull(1)
+    }
+
+    // ---------------------------------------------------------------
     // Backend 解析
     // ---------------------------------------------------------------
 
@@ -1527,6 +1959,14 @@ class DownloadRepository(private val context: Context) {
                 requestBuilder.header("Cookie", buildCookieHeader(xCookies))
             }
             logD("download.headers platform=x cookie=${if (xCookies.isNotEmpty()) "present" else "absent"}")
+            return
+        }
+
+        val isKuaishouHost = host.endsWith("kwimgs.com") || host.endsWith("kwai.net") ||
+            host.endsWith("kuaishou.com") || host.endsWith("yximgs.com")
+        if (isKuaishouHost) {
+            requestBuilder.header("Referer", "https://www.kuaishou.com/")
+            logD("download.headers platform=kuaishou")
         }
     }
 

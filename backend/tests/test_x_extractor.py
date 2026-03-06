@@ -106,7 +106,7 @@ class TestParseHelpers:
                 }
             }
         }
-        title, candidates = self.ext._extract_video_candidates_from_graphql(payload)
+        title, candidates, _images = self.ext._extract_media_from_graphql(payload)
         assert title == "测试 X 视频标题"
         assert len(candidates) == 3
         assert candidates[0].endswith("/b.mp4")
@@ -135,7 +135,7 @@ class TestParseHelpers:
                 }
             }
         }
-        title, candidates = self.ext._extract_video_candidates_from_graphql(payload)
+        title, candidates, _images = self.ext._extract_media_from_graphql(payload)
         assert title == "卡片视频"
         assert len(candidates) == 2
         assert candidates[0].endswith("/b.mp4")
