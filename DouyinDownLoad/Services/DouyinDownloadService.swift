@@ -673,80 +673,127 @@ actor DouyinDownloadService {
         log("downloadVideo start, id: \(id), candidates: \(candidates.map(\.absoluteString))")
 
         var lastStatusCode = -1
+        var lastError: Error?
 
         for (index, candidate) in candidates.enumerated() {
-            var request = URLRequest(url: candidate)
-            // X 等平台大码率视频通过本地 backend 代理时首包可能超过 60s
-            request.timeoutInterval = 180
-            request.addValue("*/*", forHTTPHeaderField: "Accept")
-            request.addValue("bytes=0-", forHTTPHeaderField: "Range")
-            applyPlatformDownloadHeaders(to: &request, targetURL: candidate)
+            let fileName = "douyin_\(id).mp4"
+            let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
-            do {
-                let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    log("download attempt[\(index)] invalid response")
-                    continue
-                }
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try? FileManager.default.removeItem(at: fileURL)
+            }
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
 
-                lastStatusCode = httpResponse.statusCode
-                log("download attempt[\(index)] status: \(httpResponse.statusCode), expectedLength: \(httpResponse.expectedContentLength), url: \(candidate.absoluteString)")
+            var receivedBytes: Int64 = 0
+            var totalBytes: Int64 = -1
+            let maxResumeAttempts = 4
+            var resumeAttempt = 0
 
-                guard (200..<300).contains(httpResponse.statusCode) else {
-                    continue
-                }
+            while resumeAttempt < maxResumeAttempts {
+                var request = URLRequest(url: candidate)
+                // 大文件下载与弱网下给足超时
+                request.timeoutInterval = 180
+                request.addValue("*/*", forHTTPHeaderField: "Accept")
+                request.addValue("bytes=\(max(receivedBytes, 0))-", forHTTPHeaderField: "Range")
+                applyPlatformDownloadHeaders(to: &request, targetURL: candidate)
 
-                let fileName = "douyin_\(id).mp4"
-                let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+                do {
+                    let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        log("download attempt[\(index).\(resumeAttempt)] invalid response")
+                        break
+                    }
 
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    try FileManager.default.removeItem(at: fileURL)
-                }
-                FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-                let fileHandle = try FileHandle(forWritingTo: fileURL)
-                defer { try? fileHandle.close() }
+                    lastStatusCode = httpResponse.statusCode
+                    log("download attempt[\(index).\(resumeAttempt)] status: \(httpResponse.statusCode), expectedLength: \(httpResponse.expectedContentLength), url: \(candidate.absoluteString)")
 
-                let totalBytes = httpResponse.expectedContentLength
-                var receivedBytes: Int64 = 0
-                let bufferSize = 65_536 // 64 KB
-                var buffer = Data(capacity: bufferSize)
+                    guard (200..<300).contains(httpResponse.statusCode) else {
+                        break
+                    }
 
-                for try await byte in asyncBytes {
-                    try Task.checkCancellation()
-                    buffer.append(byte)
-                    if buffer.count >= bufferSize {
-                        fileHandle.write(buffer)
-                        receivedBytes += Int64(buffer.count)
-                        buffer.removeAll(keepingCapacity: true)
-                        if totalBytes > 0 {
-                            progress(Double(receivedBytes) / Double(totalBytes))
+                    // 某些 CDN 会忽略 Range，返回 200 全量，此时重置本地进度避免重复写入
+                    if httpResponse.statusCode == 200 && receivedBytes > 0 {
+                        receivedBytes = 0
+                        totalBytes = -1
+                        try? FileManager.default.removeItem(at: fileURL)
+                        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+                    }
+
+                    if let contentRange = httpResponse.value(forHTTPHeaderField: "Content-Range"),
+                       let slashIdx = contentRange.lastIndex(of: "/") {
+                        let totalPart = contentRange[contentRange.index(after: slashIdx)...]
+                        if let parsedTotal = Int64(totalPart) {
+                            totalBytes = parsedTotal
+                        }
+                    } else if httpResponse.statusCode == 200, httpResponse.expectedContentLength > 0 {
+                        totalBytes = httpResponse.expectedContentLength
+                    }
+
+                    let fileHandle = try FileHandle(forWritingTo: fileURL)
+                    defer { try? fileHandle.close() }
+                    try? fileHandle.seekToEnd()
+
+                    let bufferSize = 65_536 // 64 KB
+                    var buffer = Data(capacity: bufferSize)
+
+                    for try await byte in asyncBytes {
+                        try Task.checkCancellation()
+                        buffer.append(byte)
+                        if buffer.count >= bufferSize {
+                            fileHandle.write(buffer)
+                            receivedBytes += Int64(buffer.count)
+                            buffer.removeAll(keepingCapacity: true)
+                            if totalBytes > 0 {
+                                progress(min(1.0, Double(receivedBytes) / Double(totalBytes)))
+                            }
                         }
                     }
-                }
 
-                // 写入剩余 buffer
-                if !buffer.isEmpty {
-                    fileHandle.write(buffer)
-                    receivedBytes += Int64(buffer.count)
-                }
+                    if !buffer.isEmpty {
+                        fileHandle.write(buffer)
+                        receivedBytes += Int64(buffer.count)
+                    }
 
-                if totalBytes > 0 {
+                    guard receivedBytes > 0 else { break }
+
+                    if totalBytes > 0 && receivedBytes < totalBytes {
+                        resumeAttempt += 1
+                        log("download attempt[\(index).\(resumeAttempt)] incomplete: \(receivedBytes)/\(totalBytes), retry resume")
+                        continue
+                    }
+
                     progress(1.0)
+                    log("downloadVideo success, file written: \(fileURL.path), bytes: \(receivedBytes)")
+                    return fileURL
+                } catch is CancellationError {
+                    log("download cancelled by user")
+                    throw CancellationError()
+                } catch {
+                    lastError = error
+                    log("download attempt[\(index).\(resumeAttempt)] error: \(error.localizedDescription), received: \(receivedBytes)")
+                    if isRetriableNetworkError(error), receivedBytes > 0 {
+                        resumeAttempt += 1
+                        continue
+                    }
+                    break
                 }
-
-                guard receivedBytes > 0 else { continue }
-
-                log("downloadVideo success, file written: \(fileURL.path), bytes: \(receivedBytes)")
-                return fileURL
-            } catch is CancellationError {
-                log("download cancelled by user")
-                throw CancellationError()
-            } catch {
-                log("download attempt[\(index)] error: \(error.localizedDescription)")
             }
         }
 
+        if let lastError {
+            throw lastError
+        }
         throw DouyinDownloadError.downloadFailed(statusCode: lastStatusCode)
+    }
+
+    private func isRetriableNetworkError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .networkConnectionLost, .timedOut, .cannotConnectToHost, .resourceUnavailable:
+            return true
+        default:
+            return false
+        }
     }
 
     private func candidateDownloadURLs(from url: URL) -> [URL] {
