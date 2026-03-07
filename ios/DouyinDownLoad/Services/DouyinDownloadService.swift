@@ -1056,62 +1056,95 @@ actor DouyinDownloadService {
     /// 通过 Instagram Private API (oembed + media info) 获取媒体信息
     private func resolveInstagramViaPrivateAPI(normalizedURL: String, cookies: [String: String]) async -> InstagramResolveResult {
         let headers = buildInstagramHeaders(referer: normalizedURL, cookies: cookies, jsonAPI: true)
+        let shortcode = extractInstagramShortcode(from: normalizedURL)
 
-        // 1. oembed API -> 获取 media_id
-        guard let encodedURL = normalizedURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let oembedURL = URL(string: "https://www.instagram.com/api/v1/oembed/?url=\(encodedURL)") else {
-            return InstagramResolveResult()
+        var fallbackTitle: String?
+        var mediaId: String?
+
+        // 1) oembed API
+        if let encodedURL = normalizedURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+           let oembedURL = URL(string: "https://www.instagram.com/api/v1/oembed/?url=\(encodedURL)"),
+           let payload = await requestInstagramJSON(url: oembedURL, headers: headers, logTag: "oembed") {
+            fallbackTitle = payload["title"] as? String
+            mediaId = payload["media_id"] as? String
         }
 
-        var oembedReq = URLRequest(url: oembedURL)
-        oembedReq.timeoutInterval = 15
-        applyHeaders(headers, to: &oembedReq)
-
-        let oembedPayload: [String: Any]
-        do {
-            let (data, response) = try await URLSession.shared.data(for: oembedReq)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                log("instagram oembed failed: status=\((response as? HTTPURLResponse)?.statusCode ?? -1)")
-                return InstagramResolveResult()
+        // 2) media id info API
+        if let mediaId, !mediaId.isEmpty,
+           let infoURL = URL(string: "https://www.instagram.com/api/v1/media/\(mediaId)/info/"),
+           let infoPayload = await requestInstagramJSON(url: infoURL, headers: headers, logTag: "mediaInfo") {
+            var result = extractInstagramFromMediaInfo(infoPayload, fallbackTitle: fallbackTitle)
+            if result.videoId == nil { result.videoId = mediaId }
+            if !result.videoCandidates.isEmpty || !result.imageURLs.isEmpty {
+                return result
             }
-            oembedPayload = json
-        } catch {
-            log("instagram oembed error: \(error.localizedDescription)")
-            return InstagramResolveResult()
+            log("instagram mediaInfo no media candidates")
         }
 
-        let fallbackTitle = oembedPayload["title"] as? String
-        guard let mediaId = oembedPayload["media_id"] as? String, !mediaId.isEmpty else {
-            return InstagramResolveResult(title: fallbackTitle)
-        }
-
-        // 2. media info API -> 获取视频/图片 URL
-        guard let infoURL = URL(string: "https://www.instagram.com/api/v1/media/\(mediaId)/info/") else {
-            return InstagramResolveResult(title: fallbackTitle, videoId: mediaId)
-        }
-
-        var infoReq = URLRequest(url: infoURL)
-        infoReq.timeoutInterval = 15
-        applyHeaders(headers, to: &infoReq)
-
-        let infoPayload: [String: Any]
-        do {
-            let (data, response) = try await URLSession.shared.data(for: infoReq)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                log("instagram mediaInfo failed: status=\((response as? HTTPURLResponse)?.statusCode ?? -1)")
-                return InstagramResolveResult(title: fallbackTitle, videoId: mediaId)
+        // 3) shortcode info API 回退（避免 oembed/media_id 失效）
+        if let shortcode, !shortcode.isEmpty {
+            let shortcodeResult = await resolveInstagramViaShortcodeAPI(shortcode: shortcode, headers: headers, fallbackTitle: fallbackTitle)
+            if !shortcodeResult.videoCandidates.isEmpty || !shortcodeResult.imageURLs.isEmpty {
+                var result = shortcodeResult
+                if result.videoId == nil { result.videoId = mediaId ?? shortcode }
+                return result
             }
-            infoPayload = json
-        } catch {
-            log("instagram mediaInfo error: \(error.localizedDescription)")
-            return InstagramResolveResult(title: fallbackTitle, videoId: mediaId)
+            var result = shortcodeResult
+            if result.videoId == nil { result.videoId = mediaId ?? shortcode }
+            return result
         }
 
-        var result = extractInstagramFromMediaInfo(infoPayload, fallbackTitle: fallbackTitle)
-        if result.videoId == nil { result.videoId = mediaId }
-        return result
+        return InstagramResolveResult(title: fallbackTitle, videoId: mediaId)
+    }
+
+    private func requestInstagramJSON(url: URL, headers: [String: String], logTag: String) async -> [String: Any]? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        applyHeaders(headers, to: &request)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                log("instagram \(logTag) invalid response")
+                return nil
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                log("instagram \(logTag) failed: status=\(http.statusCode)")
+                return nil
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                log("instagram \(logTag) invalid json")
+                return nil
+            }
+            return json
+        } catch {
+            log("instagram \(logTag) error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func resolveInstagramViaShortcodeAPI(shortcode: String, headers: [String: String], fallbackTitle: String?) async -> InstagramResolveResult {
+        let endpoints = [
+            "https://www.instagram.com/api/v1/media/\(shortcode)/info/",
+            "https://www.instagram.com/api/v1/media/shortcode/\(shortcode)/info/",
+        ]
+
+        for (index, endpoint) in endpoints.enumerated() {
+            guard let url = URL(string: endpoint),
+                  let payload = await requestInstagramJSON(url: url, headers: headers, logTag: "shortcodeInfo[\(index)]") else {
+                continue
+            }
+
+            var result = extractInstagramFromMediaInfo(payload, fallbackTitle: fallbackTitle)
+            if result.videoId == nil { result.videoId = shortcode }
+            if !result.videoCandidates.isEmpty || !result.imageURLs.isEmpty {
+                log("instagram shortcode info success: try[\(index)], shortcode=\(shortcode)")
+                return result
+            }
+            log("instagram shortcode info no candidates: try[\(index)]")
+        }
+
+        return InstagramResolveResult(title: fallbackTitle, videoId: shortcode)
     }
 
     private func extractInstagramFromMediaInfo(_ payload: [String: Any], fallbackTitle: String?) -> InstagramResolveResult {
@@ -1220,6 +1253,8 @@ actor DouyinDownloadService {
             #""video_url":"(https:[^"]+)""#,
             #""contentUrl":"(https:[^"]+)""#,
             #""url":"(https:[^"]+\.mp4[^"]*)""#,
+            #"<meta[^>]+property="og:video(?::secure_url|:url)?"[^>]+content="(https:[^"]+)""#,
+            #"<meta[^>]+content="(https:[^"]+)"[^>]+property="og:video(?::secure_url|:url)?""#,
         ]
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { continue }

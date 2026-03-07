@@ -771,56 +771,100 @@ class DownloadRepository(private val context: Context) {
         cookies: Map<String, String>,
     ): InstagramResolveResult {
         val headers = buildInstagramHeaders(referer = normalizedUrl, cookies = cookies, jsonApi = true)
+        val shortcode = extractInstagramShortcode(normalizedUrl)
 
         val oembedUrl = "https://www.instagram.com/api/v1/oembed/?url=${
             java.net.URLEncoder.encode(normalizedUrl, "UTF-8")
         }"
-        val oembedReq = Request.Builder()
-            .url(oembedUrl)
-            .headers(okhttp3.Headers.headersOf(*headers.flatMap { listOf(it.key, it.value) }.toTypedArray()))
-            .build()
+        val oembedPayload = requestInstagramJson(
+            url = oembedUrl,
+            headers = headers,
+            logTag = "oembed"
+        )
+        val fallbackTitle = jsonPrimitiveContent(oembedPayload?.get("title"))
+        val mediaId = jsonPrimitiveContent(oembedPayload?.get("media_id"))
 
-        val oembedPayload = try {
-            instagramLocalClient.newCall(oembedReq).execute().use { response ->
-                if (!response.isSuccessful) {
-                    logW("local.instagram.api.oembed failed status=${response.code}")
-                    return InstagramResolveResult()
+        if (!mediaId.isNullOrBlank()) {
+            val infoPayload = requestInstagramJson(
+                url = "https://www.instagram.com/api/v1/media/$mediaId/info/",
+                headers = headers,
+                logTag = "mediaInfo"
+            )
+            if (infoPayload != null) {
+                val parsed = extractInstagramFromMediaInfo(infoPayload, fallbackTitle)
+                if (parsed.videoCandidates.isNotEmpty() || parsed.imageUrls.isNotEmpty()) {
+                    return parsed.copy(videoId = parsed.videoId ?: mediaId)
                 }
-                val body = response.body?.string() ?: return InstagramResolveResult()
-                json.parseToJsonElement(body) as? JsonObject
+                logW("local.instagram.api.mediaInfo no media candidates")
             }
-        } catch (e: Exception) {
-            logW("local.instagram.api.oembed exception=${e.message}")
-            return InstagramResolveResult()
-        } ?: return InstagramResolveResult()
-
-        val fallbackTitle = jsonPrimitiveContent(oembedPayload["title"])
-        val mediaId = jsonPrimitiveContent(oembedPayload["media_id"])
-        if (mediaId.isNullOrBlank()) {
-            return InstagramResolveResult(title = fallbackTitle)
         }
 
-        val infoReq = Request.Builder()
-            .url("https://www.instagram.com/api/v1/media/$mediaId/info/")
+        if (!shortcode.isNullOrBlank()) {
+            val shortcodeResolved = resolveInstagramViaShortcodeInfo(shortcode, headers, fallbackTitle)
+            if (shortcodeResolved.videoCandidates.isNotEmpty() || shortcodeResolved.imageUrls.isNotEmpty()) {
+                return shortcodeResolved.copy(videoId = shortcodeResolved.videoId ?: mediaId)
+            }
+            return shortcodeResolved.copy(videoId = shortcodeResolved.videoId ?: mediaId)
+        }
+
+        return InstagramResolveResult(title = fallbackTitle, videoId = mediaId)
+    }
+
+    private fun requestInstagramJson(
+        url: String,
+        headers: Map<String, String>,
+        logTag: String,
+    ): JsonObject? {
+        val request = Request.Builder()
+            .url(url)
             .headers(okhttp3.Headers.headersOf(*headers.flatMap { listOf(it.key, it.value) }.toTypedArray()))
             .build()
 
-        val infoPayload = try {
-            instagramLocalClient.newCall(infoReq).execute().use { response ->
+        return try {
+            instagramLocalClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    logW("local.instagram.api.mediaInfo failed status=${response.code}")
-                    return InstagramResolveResult(title = fallbackTitle, videoId = mediaId)
+                    logW("local.instagram.api.$logTag failed status=${response.code}")
+                    return null
                 }
-                val body = response.body?.string() ?: return InstagramResolveResult(title = fallbackTitle, videoId = mediaId)
+                val body = response.body?.string()
+                if (body.isNullOrBlank()) {
+                    logW("local.instagram.api.$logTag empty body")
+                    return null
+                }
                 json.parseToJsonElement(body) as? JsonObject
             }
         } catch (e: Exception) {
-            logW("local.instagram.api.mediaInfo exception=${e.message}")
-            return InstagramResolveResult(title = fallbackTitle, videoId = mediaId)
-        } ?: return InstagramResolveResult(title = fallbackTitle, videoId = mediaId)
+            logW("local.instagram.api.$logTag exception=${e.message}")
+            null
+        }
+    }
 
-        val parsed = extractInstagramFromMediaInfo(infoPayload, fallbackTitle)
-        return parsed.copy(videoId = parsed.videoId ?: mediaId)
+    private fun resolveInstagramViaShortcodeInfo(
+        shortcode: String,
+        headers: Map<String, String>,
+        fallbackTitle: String?,
+    ): InstagramResolveResult {
+        val endpoints = listOf(
+            "https://www.instagram.com/api/v1/media/$shortcode/info/",
+            "https://www.instagram.com/api/v1/media/shortcode/$shortcode/info/",
+        )
+
+        for ((idx, endpoint) in endpoints.withIndex()) {
+            val payload = requestInstagramJson(
+                url = endpoint,
+                headers = headers,
+                logTag = "shortcodeInfo[$idx]"
+            ) ?: continue
+
+            val parsed = extractInstagramFromMediaInfo(payload, fallbackTitle)
+            if (parsed.videoCandidates.isNotEmpty() || parsed.imageUrls.isNotEmpty()) {
+                logD("local.instagram.api.shortcode success try[$idx] shortcode=$shortcode")
+                return parsed.copy(videoId = parsed.videoId ?: shortcode)
+            }
+            logW("local.instagram.api.shortcode try[$idx] no candidates")
+        }
+
+        return InstagramResolveResult(title = fallbackTitle, videoId = shortcode)
     }
 
     private fun extractInstagramFromMediaInfo(
@@ -923,6 +967,8 @@ class DownloadRepository(private val context: Context) {
             Regex(""""video_url":"(https:[^"]+)"""", RegexOption.IGNORE_CASE),
             Regex(""""contentUrl":"(https:[^"]+)"""", RegexOption.IGNORE_CASE),
             Regex(""""url":"(https:[^"]+\\.mp4[^"]*)"""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+property="og:video(?::secure_url|:url)?"[^>]+content="(https:[^"]+)"""", RegexOption.IGNORE_CASE),
+            Regex("""<meta[^>]+content="(https:[^"]+)"[^>]+property="og:video(?::secure_url|:url)?"""", RegexOption.IGNORE_CASE),
         )
         for (pattern in patterns) {
             for (m in pattern.findAll(html)) {
