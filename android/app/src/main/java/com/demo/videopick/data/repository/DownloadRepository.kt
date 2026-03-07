@@ -706,6 +706,7 @@ class DownloadRepository(private val context: Context) {
     private fun resolveInstagramLocally(url: String): VideoInfo {
         val start = System.currentTimeMillis()
         val normalizedUrl = normalizeInstagramInputUrl(url)
+        val shortcode = extractInstagramShortcode(normalizedUrl)
         logD("local.instagram.start url=$normalizedUrl")
 
         val cookies = CookieStore.getCookies(context, "instagram")
@@ -722,16 +723,40 @@ class DownloadRepository(private val context: Context) {
         val videoCandidates = apiResolved.videoCandidates.toMutableList()
         val imageUrls = apiResolved.imageUrls.toMutableList()
         var webpageUrl = apiResolved.webpageUrl ?: normalizedUrl
+        var encounteredChallenge = false
 
         if (videoCandidates.isEmpty() && imageUrls.isEmpty()) {
-            val pageResult = fetchInstagramWebpage(normalizedUrl, cookies)
+            var pageResult = fetchInstagramWebpage(normalizedUrl, cookies)
+            if (isInstagramChallengePage(pageResult.first, pageResult.second)) {
+                encounteredChallenge = true
+                logW("local.instagram.webpage challenged, retry without cookie")
+                try {
+                    pageResult = fetchInstagramWebpage(normalizedUrl, emptyMap())
+                } catch (e: Exception) {
+                    logW("local.instagram.webpage guest retry failed: ${e.message}")
+                }
+            }
+
             webpageUrl = pageResult.first
-            val fallback = parseInstagramHtml(pageResult.second)
+            var fallback = parseInstagramHtml(pageResult.second)
+            if (videoCandidates.isEmpty() && imageUrls.isEmpty() &&
+                fallback.videoCandidates.isEmpty() &&
+                !shortcode.isNullOrBlank()
+            ) {
+                val embedResult = fetchInstagramEmbedWebpage(shortcode)
+                if (embedResult != null) {
+                    webpageUrl = embedResult.first
+                    fallback = parseInstagramHtml(embedResult.second)
+                }
+            }
             if (title.isNullOrBlank()) title = fallback.title
             videoCandidates.addAll(fallback.videoCandidates)
         }
 
         if (videoCandidates.isEmpty() && imageUrls.isEmpty()) {
+            if (encounteredChallenge) {
+                throw Exception("Instagram触发风控挑战，请更新完整Cookie（sessionid/csrftoken/ds_user_id）后重试")
+            }
             throw Exception("未找到可下载媒体链接（cookie 可能失效）")
         }
 
@@ -961,6 +986,37 @@ class DownloadRepository(private val context: Context) {
         }
     }
 
+    private fun fetchInstagramEmbedWebpage(shortcode: String): Pair<String, String>? {
+        val endpoints = listOf(
+            "https://www.instagram.com/reel/$shortcode/embed/",
+            "https://www.instagram.com/p/$shortcode/embed/",
+            "https://www.instagram.com/tv/$shortcode/embed/",
+        )
+        for ((idx, endpoint) in endpoints.withIndex()) {
+            try {
+                val result = fetchInstagramWebpage(endpoint, emptyMap())
+                if (!isInstagramChallengePage(result.first, result.second)) {
+                    logD("local.instagram.embed success try[$idx] finalUrl=${result.first}")
+                    return result
+                }
+                logW("local.instagram.embed challenged try[$idx] finalUrl=${result.first}")
+            } catch (e: Exception) {
+                logW("local.instagram.embed failed try[$idx] exception=${e.message}")
+            }
+        }
+        return null
+    }
+
+    private fun isInstagramChallengePage(finalUrl: String, html: String): Boolean {
+        val finalLower = finalUrl.lowercase()
+        val htmlLower = html.lowercase()
+        return finalLower.contains("/challenge/") ||
+            finalLower.contains("__coig_challenged=1") ||
+            htmlLower.contains("__coig_challenged") ||
+            htmlLower.contains("challenge_required") ||
+            htmlLower.contains("/challenge/")
+    }
+
     private fun parseInstagramHtml(html: String): InstagramResolveResult {
         val videoCandidates = mutableListOf<String>()
         val patterns = listOf(
@@ -1019,8 +1075,8 @@ class DownloadRepository(private val context: Context) {
             "Accept-Language" to "en-US,en;q=0.9,zh-CN;q=0.8",
             "Referer" to referer,
             "Origin" to "https://www.instagram.com",
-            "Cookie" to buildCookieHeader(cookies),
         )
+        if (cookies.isNotEmpty()) headers["Cookie"] = buildCookieHeader(cookies)
         if (jsonApi) {
             headers["Accept"] = "application/json, text/plain, */*"
             headers["X-IG-App-ID"] = "936619743392459"

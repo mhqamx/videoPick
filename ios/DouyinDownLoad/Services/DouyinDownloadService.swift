@@ -1000,6 +1000,7 @@ actor DouyinDownloadService {
         let normalizedURL = url.absoluteString.hasPrefix("http://")
             ? "https://" + url.absoluteString.dropFirst("http://".count)
             : url.absoluteString
+        let shortcode = extractInstagramShortcode(from: normalizedURL)
 
         // 第一步: 通过 Private API 解析
         var apiResult = await resolveInstagramViaPrivateAPI(normalizedURL: normalizedURL, cookies: cookies)
@@ -1008,18 +1009,40 @@ actor DouyinDownloadService {
         var videoCandidates = apiResult.videoCandidates
         var imageURLs = apiResult.imageURLs
         var webpageURL = apiResult.webpageURL ?? normalizedURL
+        var encounteredChallenge = false
 
         // 第二步: API 失败时回退到网页解析
         if videoCandidates.isEmpty && imageURLs.isEmpty {
             log("instagram API returned no media, fallback to webpage")
-            let (finalURL, html) = try await fetchInstagramWebpage(url: normalizedURL, cookies: cookies)
-            webpageURL = finalURL
-            let fallback = parseInstagramHTML(html)
+            var page = try await fetchInstagramWebpage(url: normalizedURL, cookies: cookies)
+            if isInstagramChallengePage(finalURL: page.0, html: page.1) {
+                encounteredChallenge = true
+                log("instagram webpage challenged, retry without cookie")
+                do {
+                    page = try await fetchInstagramWebpage(url: normalizedURL, cookies: [:])
+                } catch {
+                    log("instagram webpage guest retry failed: \(error.localizedDescription)")
+                }
+            }
+
+            webpageURL = page.0
+            var fallback = parseInstagramHTML(page.1)
+            if fallback.videoCandidates.isEmpty,
+               fallback.imageURLs.isEmpty,
+               let shortcode,
+               let embedPage = await fetchInstagramEmbedWebpage(shortcode: shortcode) {
+                webpageURL = embedPage.0
+                fallback = parseInstagramHTML(embedPage.1)
+            }
             if title == nil || title!.isEmpty { title = fallback.title }
             videoCandidates.append(contentsOf: fallback.videoCandidates)
+            imageURLs.append(contentsOf: fallback.imageURLs)
         }
 
         guard !videoCandidates.isEmpty || !imageURLs.isEmpty else {
+            if encounteredChallenge {
+                throw DouyinDownloadError.backendResolveFailed(reason: "Instagram触发风控挑战，请更新完整Cookie（sessionid/csrftoken/ds_user_id）后重试")
+            }
             throw DouyinDownloadError.noVideoLinkFound
         }
 
@@ -1245,6 +1268,39 @@ actor DouyinDownloadService {
         return (finalURL, html)
     }
 
+    private func fetchInstagramEmbedWebpage(shortcode: String) async -> (String, String)? {
+        let endpoints = [
+            "https://www.instagram.com/reel/\(shortcode)/embed/",
+            "https://www.instagram.com/p/\(shortcode)/embed/",
+            "https://www.instagram.com/tv/\(shortcode)/embed/",
+        ]
+
+        for (index, endpoint) in endpoints.enumerated() {
+            do {
+                let page = try await fetchInstagramWebpage(url: endpoint, cookies: [:])
+                if !isInstagramChallengePage(finalURL: page.0, html: page.1) {
+                    log("instagram embed success: try[\(index)], finalUrl=\(page.0)")
+                    return page
+                }
+                log("instagram embed challenged: try[\(index)], finalUrl=\(page.0)")
+            } catch {
+                log("instagram embed failed: try[\(index)], error=\(error.localizedDescription)")
+            }
+        }
+
+        return nil
+    }
+
+    private func isInstagramChallengePage(finalURL: String, html: String) -> Bool {
+        let finalLower = finalURL.lowercased()
+        let htmlLower = html.lowercased()
+        return finalLower.contains("/challenge/")
+            || finalLower.contains("__coig_challenged=1")
+            || htmlLower.contains("__coig_challenged")
+            || htmlLower.contains("challenge_required")
+            || htmlLower.contains("/challenge/")
+    }
+
     /// 从 Instagram 网页 HTML 中解析视频链接
     private func parseInstagramHTML(_ html: String) -> InstagramResolveResult {
         var videoCandidates: [String] = []
@@ -1315,8 +1371,10 @@ actor DouyinDownloadService {
             "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8",
             "Referer": referer,
             "Origin": "https://www.instagram.com",
-            "Cookie": cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; "),
         ]
+        if !cookies.isEmpty {
+            headers["Cookie"] = cookies.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
+        }
         if jsonAPI {
             headers["Accept"] = "application/json, text/plain, */*"
             headers["X-IG-App-ID"] = "936619743392459"
