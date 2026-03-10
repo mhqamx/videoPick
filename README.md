@@ -16,8 +16,6 @@
 
 ### 本地解析能力
 
-| 平台 | iOS 本地 | Android 本地 | Backend |
-|------|---------|-------------|---------|
 | 平台 | iOS 本地 | Android 本地 | Flutter 本地 | Backend |
 |------|---------|-------------|-------------|---------|
 | 抖音 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
@@ -59,7 +57,12 @@
 └── README.md
 ```
 
-## 快速运行
+## 快速开始
+
+```bash
+git clone https://github.com/mhqamx/videoPick.git
+cd videoPick
+```
 
 ### 1) 启动 backend
 
