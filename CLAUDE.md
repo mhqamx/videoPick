@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-多平台短视频/图文无水印下载工具，采用"iOS/Android 客户端 + Python backend 解析代理"三端架构。支持抖音、TikTok、Instagram、X (Twitter)、B站、快手、小红书。客户端支持本地解析（抖音/小红书/快手/Instagram/X）+ backend 回退。支持视频和图文两种媒体类型下载。
+多平台短视频/图文无水印下载工具，采用"iOS/Android/Flutter 客户端 + Python backend 解析代理"四端架构。支持抖音、TikTok、Instagram、X (Twitter)、B站、快手、小红书。客户端支持本地解析（抖音/小红书/快手/Instagram/X）+ backend 回退。支持视频和图文两种媒体类型下载。
 
 ## 常用命令
 
@@ -16,6 +16,17 @@ open ios/DouyinDownLoad.xcodeproj
 
 # 命令行构建（模拟器）
 xcodebuild -project ios/DouyinDownLoad.xcodeproj -scheme DouyinDownLoad -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+```
+
+### Flutter 构建
+
+```bash
+cd flutter
+flutter pub get
+flutter run                    # debug 模式（需要连接设备）
+flutter run --release          # release 模式（可脱机使用）
+flutter build ipa              # 打 iOS ipa 包
+flutter build apk              # 打 Android apk 包
 ```
 
 ### Android 构建
@@ -90,6 +101,28 @@ MainActivity (Compose)
 
 **与 iOS 对等功能：** 后端解析 + 本地抖音解析回退、视频/图文下载、Cookie 配置、保存到相册/下载目录。
 
+### Flutter 端 (Provider + MVVM)
+
+```
+VideoPickApp (@main)
+  → DownloadPage (ChangeNotifierProvider)
+    → DownloadViewModel (ChangeNotifier)
+      → DownloadService (singleton, 本地解析 + backend 回退)
+      → CookieStore (SharedPreferences 持久化)
+  → CookieSettingsPage (Cookie 配置界面)
+  → FullscreenImagePage (图片全屏预览)
+```
+
+**包名：** `com.demo.videoPick`
+
+**HTTP 网络栈：** iOS/macOS 使用 `cupertino_http`（`CupertinoClient`，基于原生 `URLSession`，走系统代理/VPN）；其他平台使用 `dart:io` 默认客户端。解决了 `dart:io HttpClient` 不走系统代理导致的网络超时问题。
+
+**ATS 兼容：** 所有 URL 在请求前统一通过 `_ensureHttps()` 转为 HTTPS，避免 iOS App Transport Security 拦截 HTTP 请求。
+
+**UIScene 生命周期：** iOS 端使用 `FlutterImplicitEngineDelegate` + `FlutterSceneDelegate`（Flutter 3.41+ UIScene 迁移方案），Info.plist 需要 `UIApplicationSceneManifest` 配置。
+
+**与 iOS/Android 对等功能：** 本地解析（抖音/小红书/快手/Instagram/X）+ backend 回退、视频/图文下载、Cookie 配置、保存到相册。
+
 ### Python Backend (FastAPI + Extractor 插件架构)
 
 ```
@@ -142,4 +175,5 @@ FastAPI (main.py)
 
 - **iOS 端：** 零第三方依赖，仅使用系统框架（SwiftUI, Foundation, Photos, AVKit, UIKit）
 - **Android 端：** OkHttp, kotlinx.serialization, Jetpack Compose, Media3 ExoPlayer
+- **Flutter 端：** http, cupertino_http, provider, photo_manager, video_player, path_provider, shared_preferences, share_plus, photo_view, permission_handler
 - **Backend：** fastapi + httpx + pydantic

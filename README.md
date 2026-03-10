@@ -1,6 +1,6 @@
 # DouyinDownLoad
 
-多平台短视频/图文无水印下载工具，采用 **iOS/Android 客户端 + Python backend 解析代理** 三端架构。
+多平台短视频/图文无水印下载工具，采用 **iOS/Android/Flutter 客户端 + Python backend 解析代理** 四端架构。
 
 ## 支持平台
 
@@ -18,13 +18,15 @@
 
 | 平台 | iOS 本地 | Android 本地 | Backend |
 |------|---------|-------------|---------|
-| 抖音 | ✅ local-first | ✅ local-first | ✅ |
-| 小红书 | ✅ local-first | ✅ local-first | ✅ |
-| 快手 | ✅ local-first | ✅ local-first | ✅ |
-| Instagram | ✅ local-only | ✅ local-only | ✅ |
-| X (Twitter) | ✅ local-only | ✅ local-only | ✅ |
-| TikTok | ❌ backend-only | ❌ backend-only | ✅ |
-| B站 | ❌ backend-only | ❌ backend-only | ✅ |
+| 平台 | iOS 本地 | Android 本地 | Flutter 本地 | Backend |
+|------|---------|-------------|-------------|---------|
+| 抖音 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
+| 小红书 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
+| 快手 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
+| Instagram | ✅ local-only | ✅ local-only | ✅ local-only | ✅ |
+| X (Twitter) | ✅ local-only | ✅ local-only | ✅ local-only | ✅ |
+| TikTok | ❌ backend-only | ❌ backend-only | ❌ backend-only | ✅ |
+| B站 | ❌ backend-only | ❌ backend-only | ❌ backend-only | ✅ |
 
 ## 项目结构
 
@@ -39,6 +41,14 @@
 │       └── Views/
 ├── android/                             # Android App (Jetpack Compose + MVVM)
 │   └── app/src/main/java/com/demo/videopick/
+├── flutter/                             # Flutter App (Provider + MVVM, 跨平台)
+│   └── lib/
+│       ├── models/
+│       ├── services/
+│       ├── viewmodels/
+│       ├── views/
+│       ├── widgets/
+│       └── main.dart
 ├── backend/                             # Python 解析/下载代理服务 (FastAPI)
 │   ├── app/
 │   │   ├── extractors/                  # 各平台解析插件
@@ -60,7 +70,16 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 2) 运行 iOS
+### 2) 运行 Flutter（跨平台）
+
+```bash
+cd flutter
+flutter pub get
+flutter run              # debug 模式
+flutter run --release    # release 模式（脱机使用）
+```
+
+### 3) 运行 iOS
 
 ```bash
 open ios/DouyinDownLoad.xcodeproj
@@ -68,7 +87,7 @@ open ios/DouyinDownLoad.xcodeproj
 
 选择模拟器或真机，`Cmd + R`。
 
-### 3) 运行 Android
+### 4) 运行 Android
 
 ```bash
 cd android
@@ -95,6 +114,7 @@ export X_COOKIE_FILE="path/to/cookies.txt"
 
 - **iOS 端**: 零第三方依赖，仅 SwiftUI + Foundation + Photos。`DouyinDownloadService` 为 actor，保证线程安全
 - **Android 端**: OkHttp + kotlinx.serialization + Jetpack Compose + Media3 ExoPlayer
+- **Flutter 端**: Provider + cupertino_http（iOS 原生网络栈）+ photo_manager。与 iOS/Android 对等的本地解析能力
 - **Backend**: FastAPI + httpx + pydantic，可扩展 Extractor 插件架构。`/resolve` 解析 + `/download` 代理下载
 
 详细架构和实现细节参见 [CLAUDE.md](CLAUDE.md)。
@@ -107,7 +127,7 @@ export X_COOKIE_FILE="path/to/cookies.txt"
 
 ## 已知限制
 
-- TikTok/B站 完全依赖 backend，无 backend 时不可用
+- TikTok/B站 完全依赖 backend，无 backend 时不可用（所有客户端均适用）
 - B站当前仅支持可直接下载的 MP4；DASH 分离流可能解析失败
 - 各平台页面结构会随时间变化，个别内容可能出现 403/404
 
