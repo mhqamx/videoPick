@@ -124,9 +124,16 @@ export X_COOKIE_FILE="path/to/cookies.txt"
 
 ## Codespaces 对接
 
+在 Codespace 中同步最新代码：
+
+```bash
+git fetch origin
+git reset --hard origin/main
+```
+
 - backend 端口 `8000` 需要设为 `Public`
 - 使用 `https://<name>-8000.app.github.dev` 地址
-- iOS/Android 端已做 localhost 归一化处理
+- iOS/Android/Flutter 端已做 localhost 归一化处理
 
 ## 已知限制
 
