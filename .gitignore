@@ -1,1 +1,37 @@
-ios/.DS_Store
+.DS_Store
+**/.DS_Store
+
+# Local agent / editor state
+.agents/
+.claude/
+**/.idea/
+**/*.iml
+**/*.xcuserstate
+**/xcuserdata/
+
+# Python
+**/.venv/
+**/.venv*/
+**/__pycache__/
+**/.pytest_cache/
+
+# Android / Gradle
+**/.gradle/
+**/build/
+**/local.properties
+**/keystore.properties
+
+# Flutter
+flutter/.dart_tool/
+flutter/.flutter-plugins
+flutter/.flutter-plugins-dependencies
+
+# React Native
+react-native/node_modules/
+react-native/.bundle/
+react-native/vendor/
+react-native/ios/Pods/
+react-native/ios/build/
+react-native/ios/.xcode.env.local
+react-native/IOS_REACT_NATIVE_环境问题排查总结_*.md
+scripts/generated_icons/

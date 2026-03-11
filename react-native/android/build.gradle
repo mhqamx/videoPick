@@ -1,0 +1,31 @@
+buildscript {
+    ext {
+        buildToolsVersion = "36.1.0"
+        minSdkVersion = 24
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        // Align with the NDK version required by React Native 0.83 and
+        // available in the local Android SDK installation.
+        ndkVersion = "27.0.12077973"
+        kotlinVersion = "2.1.20"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url("$rootDir/../node_modules/@react-native-async-storage/async-storage/android/local_repo") }
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
