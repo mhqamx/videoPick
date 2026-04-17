@@ -22,8 +22,7 @@ actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
     private let backendResolveURLs: [URL] = [
 //        URL(string: "http://127.0.0.1:8000/resolve")!,
-        URL(string: "http://192.168.1.100:8000/resolve")!,
-        URL(string: "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve")!,
+        URL(string: "https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/resolve")!,
     ]
 
     private init() {}
@@ -72,19 +71,9 @@ actor DouyinDownloadService {
                 }
             }
         } else if isDouyin {
-            log("detected douyin URL, try local parser first")
-            do {
-                videoInfo = try await resolveDouyinShortURL(extractedURL!)
-                log("local douyin resolve success")
-            } catch {
-                log("local douyin resolve failed: \(error.localizedDescription), fallback to backend")
-                do {
-                    videoInfo = try await resolveViaBackend(text: text)
-                    log("resolve via backend success")
-                } catch {
-                    throw error
-                }
-            }
+            log("detected douyin URL, local only (no backend fallback)")
+            videoInfo = try await resolveDouyinShortURL(extractedURL!)
+            log("local douyin resolve success")
         } else if isXiaohongshu {
             log("detected xiaohongshu URL, try local parser first")
             do {
@@ -106,13 +95,8 @@ actor DouyinDownloadService {
                 videoInfo = try await resolveViaBackend(text: text)
                 log("resolve via backend success")
             } catch {
-                let backendErrorMessage = error.localizedDescription
-                log("resolve via backend failed: \(backendErrorMessage)")
-                if let url = extractedURL, isDouyinURL(url) {
-                    videoInfo = try await resolveDouyinShortURL(url)
-                } else {
-                    throw DouyinDownloadError.backendResolveFailed(reason: "当前链接仅支持服务端解析，请检查 backend 服务是否可用")
-                }
+                log("resolve via backend failed: \(error.localizedDescription)")
+                throw DouyinDownloadError.backendResolveFailed(reason: "当前链接仅支持服务端解析，请检查 backend 服务是否可用")
             }
         }
 
@@ -270,6 +254,41 @@ actor DouyinDownloadService {
             throw DouyinDownloadError.videoDataNotFound
         }
 
+        do {
+            return try parseVideoInfo(from: htmlString)
+        } catch {
+            if let finalURL = httpResponse.url,
+               finalURL.path.contains("/share/slides/"),
+               let rewritten = rewriteSlidesToVideo(finalURL) {
+                log("slides share page missing JSON, retry with /share/video/: \(rewritten.absoluteString)")
+                return try await fetchAndParseIesdouyin(rewritten)
+            }
+            throw error
+        }
+    }
+
+    private func rewriteSlidesToVideo(_ url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.path = components.path.replacingOccurrences(of: "/share/slides/", with: "/share/video/")
+        return components.url
+    }
+
+    private func fetchAndParseIesdouyin(_ url: URL) async throws -> DouyinVideoInfo {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.addValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
+        request.addValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.addValue("zh-CN,zh-Hans;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.addValue("https://www.douyin.com/", forHTTPHeaderField: "Referer")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode),
+              let htmlString = String(data: data, encoding: .utf8) else {
+            throw DouyinDownloadError.videoDataNotFound
+        }
+        log("slides retry response bytes: \(data.count)")
         return try parseVideoInfo(from: htmlString)
     }
 

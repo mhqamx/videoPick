@@ -211,6 +211,14 @@ def resolve_video(url: str) -> LocalResolvedVideo:
         html = resp.text
         webpage_url = str(resp.url)
 
+        # 抖音图文 slides 壳子页无 JSON，重写为 /share/video/ 路径再取一次
+        if "/share/slides/" in webpage_url and "_ROUTER_DATA" not in html:
+            rewritten = webpage_url.replace("/share/slides/", "/share/video/")
+            retry = client.get(rewritten)
+            if retry.status_code == 200 and "_ROUTER_DATA" in retry.text:
+                html = retry.text
+                webpage_url = str(retry.url)
+
     json_payload, is_render_data = _extract_json_payload(html)
     title: str | None = None
     video_id: str | None = None
