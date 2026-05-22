@@ -1,0 +1,367 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 63;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		9E63214EFAE8D93D38A90F15 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FFFA998D476F3F9249BAD31D /* Assets.xcassets */; };
+		AE9BAAB2E48865A195382217 /* DouyinDownLoadSPMDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70AD50064F33F96712A197EA /* DouyinDownLoadSPMDemoApp.swift */; };
+		B3F69E04616192A9FCE61DD5 /* DouyinDownLoadSPM in Frameworks */ = {isa = PBXBuildFile; productRef = 80DF2ABFEE8103ECDF72FEEF /* DouyinDownLoadSPM */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		638139317EAEAC34E5E6FE18 /* spm */ = {isa = PBXFileReference; lastKnownFileType = folder; name = spm; path = ../spm; sourceTree = SOURCE_ROOT; };
+		70AD50064F33F96712A197EA /* DouyinDownLoadSPMDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DouyinDownLoadSPMDemoApp.swift; sourceTree = "<group>"; };
+		9A79AB856D72C4E034A5F0BA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9CCFDF043E56798DAEAFB99E /* DouyinDownLoadSPMDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DouyinDownLoadSPMDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FFFA998D476F3F9249BAD31D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AE066F492B51AE8297170A59 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3F69E04616192A9FCE61DD5 /* DouyinDownLoadSPM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2C90F7B8EB70FC0C2F64E1C1 = {
+			isa = PBXGroup;
+			children = (
+				5371D18370DD24FEAD993FC3 /* App */,
+				302B6158D1A0BAD30577047E /* Packages */,
+				BF2C5403248B9C30A01B8899 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		302B6158D1A0BAD30577047E /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				638139317EAEAC34E5E6FE18 /* spm */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		5371D18370DD24FEAD993FC3 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				FFFA998D476F3F9249BAD31D /* Assets.xcassets */,
+				70AD50064F33F96712A197EA /* DouyinDownLoadSPMDemoApp.swift */,
+				9A79AB856D72C4E034A5F0BA /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		BF2C5403248B9C30A01B8899 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9CCFDF043E56798DAEAFB99E /* DouyinDownLoadSPMDemo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1072196C8DA63FAF7D56FA57 /* DouyinDownLoadSPMDemo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F6B6114D82498F64C00E37A2 /* Build configuration list for PBXNativeTarget "DouyinDownLoadSPMDemo" */;
+			buildPhases = (
+				DEC6FD9167101E65A4E48425 /* Sources */,
+				1393E7129E1C7CDE6A284950 /* Resources */,
+				AE066F492B51AE8297170A59 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DouyinDownLoadSPMDemo;
+			packageProductDependencies = (
+				80DF2ABFEE8103ECDF72FEEF /* DouyinDownLoadSPM */,
+			);
+			productName = DouyinDownLoadSPMDemo;
+			productReference = 9CCFDF043E56798DAEAFB99E /* DouyinDownLoadSPMDemo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		519C80995D15B83C1406F583 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					1072196C8DA63FAF7D56FA57 = {
+						DevelopmentTeam = 57SZ35YG6E;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 4A86A75506B383A543616F21 /* Build configuration list for PBXProject "DouyinDownLoadSPMDemo" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2C90F7B8EB70FC0C2F64E1C1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D8FB05A3EA7BFB8018C0337D /* XCLocalSwiftPackageReference "../spm" */,
+			);
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1072196C8DA63FAF7D56FA57 /* DouyinDownLoadSPMDemo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1393E7129E1C7CDE6A284950 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9E63214EFAE8D93D38A90F15 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		DEC6FD9167101E65A4E48425 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AE9BAAB2E48865A195382217 /* DouyinDownLoadSPMDemoApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4B96E177BB5074C01921C65B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 57SZ35YG6E;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "保存下载的视频或图片到相册";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "允许将下载的视频或图片保存到相册";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.demo.DouyinDownLoadSPMDemo;
+				PRODUCT_NAME = DouyinDownLoadSPMDemo;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		64BF428106794C5D5184EB0A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		8AF91B747BD4FF1A058E5424 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 57SZ35YG6E;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "保存下载的视频或图片到相册";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "允许将下载的视频或图片保存到相册";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.demo.DouyinDownLoadSPMDemo;
+				PRODUCT_NAME = DouyinDownLoadSPMDemo;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BFC5ABDB0E78DCFCAA325810 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4A86A75506B383A543616F21 /* Build configuration list for PBXProject "DouyinDownLoadSPMDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BFC5ABDB0E78DCFCAA325810 /* Debug */,
+				64BF428106794C5D5184EB0A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F6B6114D82498F64C00E37A2 /* Build configuration list for PBXNativeTarget "DouyinDownLoadSPMDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4B96E177BB5074C01921C65B /* Debug */,
+				8AF91B747BD4FF1A058E5424 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D8FB05A3EA7BFB8018C0337D /* XCLocalSwiftPackageReference "../spm" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../spm;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		80DF2ABFEE8103ECDF72FEEF /* DouyinDownLoadSPM */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DouyinDownLoadSPM;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 519C80995D15B83C1406F583 /* Project object */;
+}

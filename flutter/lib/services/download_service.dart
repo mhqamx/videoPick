@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:cupertino_http/cupertino_http.dart';
+import 'package:cronet_http/cronet_http.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -15,11 +16,16 @@ class DownloadService {
   factory DownloadService() => _instance;
   DownloadService._();
 
-  /// Use CupertinoClient on iOS (respects system proxy/VPN via URLSession),
-  /// fall back to default IOClient on other platforms.
+  /// Use platform-native HTTP clients that respect system proxy/VPN:
+  /// - iOS/macOS: CupertinoClient (URLSession)
+  /// - Android: CronetClient (Chromium network stack)
+  /// - Other: default IOClient
   http.Client _createNativeClient() {
     if (Platform.isIOS || Platform.isMacOS) {
       return CupertinoClient.defaultSessionConfiguration();
+    }
+    if (Platform.isAndroid) {
+      return CronetClient.defaultCronetEngine();
     }
     return http.Client();
   }

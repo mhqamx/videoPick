@@ -106,19 +106,104 @@ class TestParseEmbedHtml:
         }
         </script>
         """
-        title, candidates = self.ext._parse_embed_html(html, video_id)
+        title, candidates, image_urls = self.ext._parse_embed_html(html, video_id)
         assert title == "测试 TikTok 视频"
         assert len(candidates) == 1
         assert "tiktokcdn.com" in candidates[0]
 
+    def test_parse_frontity_state_key_mismatch_fallback(self):
+        # 模拟 key 不匹配的情况，程序应自动寻找第一个含 videoData 的项
+        video_id = "7603094189227789588"
+        html = """
+        <script id="__FRONTITY_CONNECT_STATE__" type="application/json">
+        {
+          "source": {
+            "data": {
+              "some_other_key": {
+                "videoData": {
+                  "itemInfos": {
+                    "text": "Fallback 视频",
+                    "video": {
+                      "urls": ["https://v16m.tiktokcdn.com/fallback.mp4"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        </script>
+        """
+        title, candidates, image_urls = self.ext._parse_embed_html(html, video_id)
+        assert title == "Fallback 视频"
+        assert candidates == ["https://v16m.tiktokcdn.com/fallback.mp4"]
+
+    def test_parse_frontity_state_with_images(self):
+        video_id = "7603094189227789588"
+        html = """
+        <script id="__FRONTITY_CONNECT_STATE__" type="application/json">
+        {
+          "source": {
+            "data": {
+              "/embed/v2/7603094189227789588": {
+                "videoData": {
+                  "itemInfos": {
+                    "text": "TikTok 图文视频",
+                    "imagePost": {
+                      "images": [
+                        {
+                          "displayAddr": {
+                            "urlList": ["https://v16m.tiktokcdn.com/img1.jpg"]
+                          }
+                        },
+                        {
+                          "imageURL": {"urlList": ["https://v16m.tiktokcdn.com/img2.jpg"]}
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        </script>
+        """
+        title, candidates, image_urls = self.ext._parse_embed_html(html, video_id)
+        assert title == "TikTok 图文视频"
+        assert candidates == []
+        assert image_urls == [
+            "https://v16m.tiktokcdn.com/img1.jpg",
+            "https://v16m.tiktokcdn.com/img2.jpg"
+        ]
+
+    def test_parse_tikwm_payload_with_images(self):
+        payload = {
+            "code": 0,
+            "data": {
+                "title": "TikWM 图文",
+                "images": [
+                    "https://www.tikwm.com/img1.jpg",
+                    "https://www.tikwm.com/img2.jpg"
+                ]
+            }
+        }
+        title, candidates, image_urls = self.ext._parse_tikwm_payload(payload)
+        assert title == "TikWM 图文"
+        assert candidates == []
+        assert image_urls == [
+            "https://www.tikwm.com/img1.jpg",
+            "https://www.tikwm.com/img2.jpg"
+        ]
+
     def test_empty_state_returns_empty(self):
         html = """<script id="__FRONTITY_CONNECT_STATE__" type="application/json">{}</script>"""
-        title, candidates = self.ext._parse_embed_html(html, "123")
+        title, candidates, image_urls = self.ext._parse_embed_html(html, "123")
         assert title is None
         assert candidates == []
 
     def test_no_script_returns_empty(self):
-        title, candidates = self.ext._parse_embed_html("<html>no data</html>", "123")
+        title, candidates, image_urls = self.ext._parse_embed_html("<html>no data</html>", "123")
         assert title is None
         assert candidates == []
 
@@ -149,7 +234,7 @@ class TestParseMainPageHtml:
         }
         </script>
         """
-        title, candidates = self.ext._parse_main_page_html(html)
+        title, candidates, image_urls = self.ext._parse_main_page_html(html)
         assert title == "Reflow 视频"
         assert len(candidates) == 2
 
@@ -172,7 +257,7 @@ class TestParseMainPageHtml:
         }
         </script>
         """
-        title, candidates = self.ext._parse_main_page_html(html)
+        title, candidates, image_urls = self.ext._parse_main_page_html(html)
         assert title == "旧版视频"
         assert len(candidates) == 1
 
@@ -191,9 +276,29 @@ class TestParseMainPageHtml:
         };
         </script>
         """
-        title, candidates = self.ext._parse_main_page_html(html)
+        title, candidates, image_urls = self.ext._parse_main_page_html(html)
         assert title == "SIGI 标题"
         assert any("tiktokv.com" in c for c in candidates)
+
+    def test_parse_tikwm_payload(self):
+        payload = {
+            "code": 0,
+            "data": {
+                "title": "TikWM 标题",
+                "play": "https://v16m.tiktokcdn-us.com/video/tos/test.mp4",
+                "hdplay": "/video/media/hd.mp4",
+                "wmplay": "//v16m.tiktokcdn-us.com/video/tos/wm.mp4",
+            },
+        }
+
+        title, candidates, image_urls = self.ext._parse_tikwm_payload(payload)
+
+        assert title == "TikWM 标题"
+        assert candidates == [
+            "https://v16m.tiktokcdn-us.com/video/tos/test.mp4",
+            "https://www.tikwm.com/video/media/hd.mp4",
+            "https://v16m.tiktokcdn-us.com/video/tos/wm.mp4",
+        ]
 
 
 class TestRegistryIntegration:

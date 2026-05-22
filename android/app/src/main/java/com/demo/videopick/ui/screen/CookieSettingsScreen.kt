@@ -17,6 +17,7 @@ import com.demo.videopick.data.repository.CookieStore
 @Composable
 fun CookieSettingsScreen(
     onBack: () -> Unit,
+    onNavigateToLocationManager: () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -69,6 +70,28 @@ fun CookieSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
         ) {
+            item(key = "tools_header") {
+                Text(
+                    text = "工具",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            item(key = "location_manager_entry") {
+                Card(onClick = onNavigateToLocationManager) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("坐标管家", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "管理常用经纬度，一键启停模拟全局定位（需在开发者选项中选中本 app 为模拟位置应用）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+            }
+
             CookieStore.supportedPlatforms.forEach { config ->
                 item(key = "${config.platform}_header") {
                     Text(

@@ -7,6 +7,19 @@ struct CookieSettingsView: View {
     var body: some View {
         NavigationView {
             List {
+                Section {
+                    NavigationLink {
+                        LocationManagerView()
+                    } label: {
+                        Label("坐标管家", systemImage: "mappin.and.ellipse")
+                    }
+                } header: {
+                    Text("工具")
+                } footer: {
+                    Text("管理常用经纬度，导出 GPX 或复制为文本，配合 iAnyGo / Xcode 等工具修改系统定位")
+                        .font(.caption2)
+                }
+
                 ForEach(CookieStore.supportedPlatforms, id: \.platform) { config in
                     Section {
                         ForEach(config.fields, id: \.key) { field in
