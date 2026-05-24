@@ -2,11 +2,12 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档版本 | v1.0（现状归档） |
+| 文档版本 | v1.1（现状归档 + 1 项规划新增） |
 | 文档日期 | 2026-05-25 |
 | 受众 | 产品 / 业务团队 |
-| 文档性质 | 现状归档型 PRD — 记录已交付能力的单一事实来源 |
-| 方法论 | BMAD-METHOD 骨架 + 业务语言混合版（FR/NFR 编号沿用 BMAD 约定） |
+| 文档性质 | 现状归档型 PRD — 记录已交付能力的单一事实来源，含少量规划项 |
+| 方法论 | BMAD-METHOD 骨架 + 业务语言混合版（FR/NFR 编号沿用 BMAD 约定，含 Epic / Story 视图） |
+| 变更记录 | v1.0 → v1.1：补充 Epic / Story 视图；新增 Story 7.1「启动 / 回前台自动读取剪贴板」（iOS 先行） |
 
 ---
 
@@ -107,6 +108,12 @@ VideoPick 针对上述痛点，以"**粘贴即下、零账号、无水印、视�
 | **FR-S3** | Flutter 通过 `photo_manager` 走对应平台原生相册接口。 |
 | **FR-S4** | 首次保存时按系统规范申请相册权限；权限被拒后给出引导提示。 |
 
+### 4.5 输入辅助（FR-I · 含规划项）
+
+| 编号 | 需求 | 状态 |
+|---|---|:---:|
+| **FR-I1** | App 每次进入前台（含冷启动）自动读取剪贴板内容；若内容相较"上次读取值"发生变化且疑似 URL，向用户给出提示并自动填入输入框。仅在 iOS 端先实现，Android / Flutter 后续跟进。 | 🚧 Planned |
+
 ---
 
 ## 5. 非功能需求（Non-Functional Requirements）
@@ -188,6 +195,103 @@ VideoPick 针对上述痛点，以"**粘贴即下、零账号、无水印、视�
 - **UX 细节**：剪贴板自动监听、解析结果预览（缩略图 + 标题）、下载历史回看等。
 - **Backend 高可用**：多节点 / Serverless 部署，降低延迟与单点风险。
 - **国际化**：界面多语言支持（当前以中文为主）。
+
+---
+
+## 11. Epic / Story 视图
+
+按 BMAD-METHOD 规范，将 FR 章节按业务能力切分为 Epic，再将每个 Epic 进一步拆解为可独立交付的 Story。绝大多数 Story 为已交付的现状归档（✅ Done），少量为规划项（🚧 Planned）。
+
+### Epic 1 · 链接解析
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| 1.1 | 通用 URL 提取：从任意粘贴文本中提取平台链接，支持短链（`v.douyin.com`、`vt.tiktok.com`、`xhslink.com` 等） | ✅ Done |
+| 1.2 | 抖音本地解析：多级回退（`_ROUTER_DATA` → `_SSR_HYDRATED_DATA` → `RENDER_DATA` → 正则） | ✅ Done |
+| 1.3 | 小红书本地解析：移动页面 `__INITIAL_STATE__`，支持图文笔记 | ✅ Done |
+| 1.4 | 快手本地解析：API + `APOLLO_STATE` + `__INITIAL_STATE__` + 正则回退，支持图集 | ✅ Done |
+| 1.5 | Instagram 本地解析：reel / post / tv 三种形态（需 Cookie） | ✅ Done |
+| 1.6 | X (Twitter) 本地解析：视频 + 图片推文（需 Cookie） | ✅ Done |
+| 1.7 | TikTok Backend 解析：embed 页面 `__FRONTITY_CONNECT_STATE__` | ✅ Done |
+| 1.8 | B 站 Backend 解析：`__INITIAL_STATE__` + Open API 回退 | ✅ Done |
+| 1.9 | 本地解析失败时自动回退到 Backend | ✅ Done |
+
+### Epic 2 · 媒体下载
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| 2.1 | 视频文件下载并存入相册 | ✅ Done |
+| 2.2 | 图集 / 图文多图批量下载并存入相册 | ✅ Done |
+| 2.3 | 大文件断点续传与不稳定网络重试（iOS） | ✅ Done |
+| 2.4 | Backend 代理下载（`/download?source=…`），绕开 CDN 移动端限制 | ✅ Done |
+
+### Epic 3 · Cookie 认证
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| 3.1 | Instagram Cookie 配置页与本地持久化 | ✅ Done |
+| 3.2 | X (Twitter) Cookie 配置页与本地持久化 | ✅ Done |
+
+### Epic 4 · 本地保存
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| 4.1 | iOS 相册保存（PhotoKit + 权限申请引导） | ✅ Done |
+| 4.2 | Android 相册 / 下载保存（MediaStore） | ✅ Done |
+| 4.3 | Flutter 相册保存（photo_manager） | ✅ Done |
+
+### Epic 5 · 三端对等交付
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| 5.1 | iOS 客户端（SwiftUI + Actor 并发模型） | ✅ Done |
+| 5.2 | Android 客户端（Jetpack Compose + OkHttp） | ✅ Done |
+| 5.3 | Flutter 客户端（Provider + cupertino_http） | ✅ Done |
+
+### Epic 6 · Backend 服务
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| 6.1 | FastAPI 框架与三路由（`/health` / `/resolve` / `/download`） | ✅ Done |
+| 6.2 | Extractor 插件架构与注册表（`BaseExtractor` + `ExtractorRegistry`） | ✅ Done |
+| 6.3 | SSRF 防护：CDN 域名白名单 | ✅ Done |
+| 6.4 | 客户端多 Backend URL 优先级回退（局域网优先，公网备用） | ✅ Done |
+
+### Epic 7 · 输入体验（新增）
+
+| Story | 描述 | 状态 |
+|---|---|:---:|
+| **7.1** | **启动 / 回前台自动读取剪贴板并提示填入（iOS 先行）** | **🚧 Planned** |
+
+#### Story 7.1 详情
+
+**User Story**
+> 作为一个普通用户，我希望每次打开 App 或从后台切回 App 时，App 能自动识别我刚才复制的链接并填到输入框里，这样我不用每次都手动点"粘贴"。
+
+**触发时机**
+- iOS App 冷启动后进入前台；
+- 已在内存中的 App 从后台回到前台（SwiftUI `scenePhase` 由 `.background` / `.inactive` 切换到 `.active`）。
+
+**验收标准（Acceptance Criteria）**
+
+| AC | 标准 |
+|---|---|
+| **AC1** | App 每次进入 `.active` 状态时，调用一次 `UIPasteboard.general.string` 读取剪贴板内容。 |
+| **AC2** | 维护一个内存中的"上次已处理剪贴板内容"缓存（不需要跨启动持久化）；仅当本次读取值非空且与缓存不同才进入提示流程。 |
+| **AC3** | 进入提示流程时，向用户展示轻量提示（toast / banner / inline 提示均可），文案示意：「已识别到剪贴板内容，已自动填入输入框」。 |
+| **AC4** | 将剪贴板内容自动填入主输入框（用户可继续编辑或直接点击下载）。 |
+| **AC5** | 接受 iOS 系统在读取剪贴板时显示的"已粘贴自 XX"系统横幅，作为隐私透明度的代价；不做规避。 |
+| **AC6** | 当前阶段仅 iOS 端实现；Android / Flutter 不在本 Story 范围内，作为后续 Story 跟进。 |
+
+**实现要点（非约束性提示，供开发参考）**
+- 在 SwiftUI App / Scene 层订阅 `scenePhase`；
+- ViewModel 持有"上次剪贴板"字段（普通 `String?` 即可，无需 `UserDefaults`）；
+- 提示形态采用与现有 UI 一致的轻量 toast，避免引入新依赖。
+
+**Out of Scope（明确不做）**
+- 不做 URL 合法性校验（任何非空文本只要与上次不同就走流程，让用户决定）；
+- 不做自动解析 / 自动下载（仅填入输入框）；
+- 不做 Android / Flutter 实现（独立 Story 后续承接）。
 
 ---
 
