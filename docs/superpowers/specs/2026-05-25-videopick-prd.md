@@ -261,7 +261,11 @@ VideoPick 针对上述痛点，以"**粘贴即下、零账号、无水印、视�
 
 | Story | 描述 | 状态 |
 |---|---|:---:|
-| **7.1** | **启动 / 回前台自动读取剪贴板并提示填入（iOS 先行）** | **🚧 Planned** |
+| **7.1** | iOS：启动 / 回前台自动读取剪贴板并提示填入 | 🔧 In Progress（Dev Done，待用户手动验证） |
+| **8.1.1** | Android：剪贴板自动读取对等实现 | 🔧 In Progress（Dev Done，待用户手动验证） |
+| **8.1.2** | Flutter（iOS + Android）：剪贴板自动读取对等实现 | 🔧 In Progress（Dev Done，待用户手动验证） |
+
+> 注：Story 8.1.1 和 8.1.2 的详细 AC 见 `docs/superpowers/specs/stories/story-8.1.1-android-clipboard.md` 和 `docs/superpowers/specs/stories/story-8.1.2-flutter-clipboard.md`。架构决策见 `docs/superpowers/architecture/2026-05-25-story-8.1-architecture.md`。本 Epic 已成为 BMAD-in-Claude-Code 完整流程的样板案例。
 
 #### Story 7.1 详情
 
