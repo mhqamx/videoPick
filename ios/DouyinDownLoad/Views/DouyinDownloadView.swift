@@ -153,6 +153,7 @@ struct DouyinDownloadView: View {
     @State private var selectedImageIndex: Int = 0
     @State private var showFullscreenImage = false
     @State private var showCookieSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     #if targetEnvironment(macCatalyst)
     private let isMac = true
@@ -166,6 +167,14 @@ struct DouyinDownloadView: View {
                 macLayout
             } else {
                 phoneLayout
+            }
+        }
+        .onAppear {
+            viewModel.checkClipboardOnForeground()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                viewModel.checkClipboardOnForeground()
             }
         }
     }
@@ -303,6 +312,10 @@ struct DouyinDownloadView: View {
 
     @ViewBuilder
     private var statusSection: some View {
+        if let hint = viewModel.clipboardHint {
+            clipboardHintView(hint)
+        }
+
         if let error = viewModel.errorMessage {
             errorView(error)
         }
@@ -503,6 +516,21 @@ struct DouyinDownloadView: View {
         .padding()
         .background(Color.red.opacity(0.1))
         .cornerRadius(8)
+    }
+
+    private func clipboardHintView(_ message: String) -> some View {
+        HStack {
+            Image(systemName: "doc.on.clipboard.fill")
+                .foregroundColor(.blue)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.blue)
+            Spacer()
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(8)
+        .transition(.opacity)
     }
 
     private func successView(_ message: String) -> some View {

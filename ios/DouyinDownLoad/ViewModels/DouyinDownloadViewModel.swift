@@ -21,11 +21,14 @@ class DouyinDownloadViewModel: ObservableObject {
     @Published var saveResult: String?
     @Published var showPreview: Bool = false
     @Published var downloadProgress: Double?
+    @Published var clipboardHint: String?
 
     // MARK: - 私有属性
 
     private let service = DouyinDownloadService.shared
     private var downloadTask: Task<Void, Never>?
+    private var lastClipboardContent: String?
+    private var clipboardHintDismissTask: Task<Void, Never>?
 
     // MARK: - 公共方法
 
@@ -138,6 +141,29 @@ class DouyinDownloadViewModel: ObservableObject {
     func pasteFromClipboard() {
         if let clipboardString = UIPasteboard.general.string {
             inputText = clipboardString
+            lastClipboardContent = clipboardString
+        }
+    }
+
+    /// Story 7.1：每次 App 进入前台时调用，若剪贴板内容与上次不同则自动填入并提示
+    func checkClipboardOnForeground() {
+        guard let clipboardString = UIPasteboard.general.string,
+              !clipboardString.isEmpty,
+              clipboardString != lastClipboardContent else { return }
+
+        lastClipboardContent = clipboardString
+        inputText = clipboardString
+        showClipboardHint("已识别到剪贴板内容，已自动填入")
+    }
+
+    private func showClipboardHint(_ message: String) {
+        clipboardHintDismissTask?.cancel()
+        clipboardHint = message
+
+        clipboardHintDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.clipboardHint = nil
         }
     }
 
