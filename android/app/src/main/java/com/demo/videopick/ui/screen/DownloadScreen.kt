@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -158,6 +159,32 @@ private fun InputSection(
 
 @Composable
 private fun StatusSection(state: UiState, viewModel: DownloadViewModel) {
+    // Story 8.1.1: 剪贴板自动读取提示（位置契约见 docs/superpowers/architecture/2026-05-25-story-8.1-architecture.md §4）
+    state.clipboardHint?.let { hint ->
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+            shape = RoundedCornerShape(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.ContentPaste,
+                    null,
+                    tint = Color(0xFF1565C0),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF1565C0),
+                )
+            }
+        }
+    }
+
     state.errorMessage?.let { error ->
         Card(
             colors = CardDefaults.cardColors(
