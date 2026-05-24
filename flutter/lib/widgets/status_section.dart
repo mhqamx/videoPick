@@ -12,6 +12,15 @@ class StatusSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Story 8.1.2: 剪贴板自动读取提示（位置契约见 docs/superpowers/architecture/2026-05-25-story-8.1-architecture.md §4）
+        if (vm.clipboardHint != null)
+          _StatusCard(
+            color: Colors.blue.shade50,
+            textColor: Colors.blue.shade800,
+            icon: Icons.content_paste,
+            message: vm.clipboardHint!,
+          ),
+
         // Error message
         if (vm.errorMessage != null)
           _StatusCard(

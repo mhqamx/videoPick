@@ -6,7 +6,9 @@ import 'package:photo_manager/photo_manager.dart';
 import '../models/video_info.dart';
 import '../services/download_service.dart';
 
-class DownloadViewModel extends ChangeNotifier {
+class DownloadViewModel extends ChangeNotifier with WidgetsBindingObserver {
+  static const String kClipboardHintText = '已识别到剪贴板内容，已自动填入';
+
   final _service = DownloadService();
 
   String inputText = '';
@@ -16,9 +18,60 @@ class DownloadViewModel extends ChangeNotifier {
   VideoInfo? videoInfo;
   bool showPreview = false;
   double? downloadProgress;
+  String? clipboardHint;
 
   Completer<void>? _cancelCompleter;
   bool _isCancelled = false;
+  String? _lastClipboardContent;
+  Timer? _clipboardHintDismissTimer;
+
+  DownloadViewModel() {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _clipboardHintDismissTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      checkClipboardOnForeground();
+    }
+  }
+
+  /// Story 8.1.2: 前台切换时自动读取剪贴板，若内容变化则填入并提示。
+  Future<void> checkClipboardOnForeground() async {
+    // AC13: 首次（cache 为 null）时把已有 inputText 同步进 cache
+    if (_lastClipboardContent == null && inputText.isNotEmpty) {
+      _lastClipboardContent = inputText;
+    }
+
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    if (text == _lastClipboardContent) return;
+
+    // AC6: 缓存先更新；AC7: 替换 inputText 并 notify
+    _lastClipboardContent = text;
+    inputText = text;
+    notifyListeners();
+    _showClipboardHint(kClipboardHintText);
+  }
+
+  void _showClipboardHint(String message) {
+    // AC9: cancel-and-restart，不堆叠
+    _clipboardHintDismissTimer?.cancel();
+    clipboardHint = message;
+    notifyListeners();
+    _clipboardHintDismissTimer = Timer(const Duration(seconds: 3), () {
+      clipboardHint = null;
+      notifyListeners();
+    });
+  }
 
   void updateInput(String text) {
     inputText = text;
