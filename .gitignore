@@ -3,7 +3,9 @@
 
 # Local agent / editor state
 .agents/
-.claude/
+# .claude/ 内容默认忽略，但 BMAD 装的 slash 命令是项目共享配置，需要进 git
+.claude/*
+!.claude/commands/
 **/.idea/
 **/*.iml
 **/*.xcuserstate

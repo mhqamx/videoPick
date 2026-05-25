@@ -178,49 +178,78 @@ FastAPI (main.py)
 - **Flutter 端：** http, cupertino_http, provider, photo_manager, video_player, path_provider, shared_preferences, share_plus, photo_view, permission_handler
 - **Backend：** fastapi + httpx + pydantic
 
-## BMAD-in-Claude-Code 工作流（产品规划 SOP）
+## BMAD 工作流（产品规划 SOP）
 
-本项目采用 [BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD) 的角色分工思想，但落地在 Claude Code 的 `Agent` 工具上。**适用场景：** 立项新功能、跨多端的 Story、需要架构决策的改动。**不适用场景：** 单点 bugfix、小 UI 调整、依赖升级——这些直接 brainstorming + 实施即可，强行走 BMAD 浪费 token。
+本项目集成 [BMAD-METHOD](https://github.com/bmad-code-org/BMAD-METHOD) 官方框架（v4.4+，通过 `bmad install -f -i claude-code` 安装），以 Claude Code 原生 slash 命令的形式提供 10 个 agent 角色。**适用场景：** 立项新功能、跨多端 Story、需要架构决策的改动。**不适用场景：** 单点 bugfix、小 UI 调整、依赖升级——直接 `superpowers:brainstorming` + 实施即可，无需走 BMAD。
 
 ### 目录约定
 
 ```
+.bmad-core/              # BMAD 框架本体（不要手改）
+├── agents/              # 角色定义（YML）
+├── tasks/               # 可执行任务（brainstorming、create-doc、shard-doc 等）
+├── templates/           # 模板（PRD、Architecture、Story、Project Brief 等 15+）
+├── workflows/           # 工作流（greenfield / brownfield × fullstack / service / ui）
+├── checklists/          # 验收清单
+└── bmad-core-config.yml # 项目配置（输出路径、命名约定）
+
+.claude/commands/        # BMAD 生成的 Claude Code slash 命令
+├── analyst.md
+├── pm.md
+├── architect.md
+├── po.md
+├── sm.md
+├── dev.md
+├── qa.md
+├── ux-expert.md
+├── bmad-orchestrator.md
+└── bmad-master.md
+
 docs/superpowers/
-├── agents/        # 角色提示词模板（PM / Architect / SM / QA）
-├── specs/         # PRD（单一事实来源）
-│   └── stories/   # 由 SM 切分出的 per-platform Story 文件
-└── architecture/  # Architect 输出的 ADR / 架构决策文档
+├── specs/               # PRD（单一事实来源）
+│   └── stories/         # SM 切分出的 per-platform Story 文件
+└── architecture/        # Architect 输出的 ADR / 架构决策文档
 ```
 
 ### 标准流程（按需裁剪）
 
-| 阶段 | 角色 | 父 Agent 调度方式 | 产出位置 |
+| 阶段 | 角色 | 调用方式 | 产出位置 |
 |---|---|---|---|
-| 1. 需求澄清 | 用户 + 父 Agent | 用 `superpowers:brainstorming` skill，一题一题问 | 概念存于上下文 |
-| 2. PRD | **PM** | `Agent(subagent_type: general-purpose)` + `docs/superpowers/agents/pm.md` 模板 + Project Brief | `docs/superpowers/specs/YYYY-MM-DD-*.md` |
-| 3. 架构决策 | **Architect** | `Agent(subagent_type: Plan)` + `docs/superpowers/agents/architect.md` 模板 + PRD 路径 + 关键文件清单 | `docs/superpowers/architecture/YYYY-MM-DD-*.md` |
-| 4. Story 切分 | **SM** | `Agent(subagent_type: general-purpose)` + `docs/superpowers/agents/sm.md` 模板 + PRD + 架构文档 | `docs/superpowers/specs/stories/story-X.Y-*.md` |
-| 5. 实施 | **Dev**（父 Agent 本人） | 不调度——父 Agent 直接 Edit 代码，因为代码需要项目完整上下文 | 源码变更 |
-| 6. 验收 | **QA** | `Agent(subagent_type: general-purpose)` + `docs/superpowers/agents/qa.md` 模板 + Story + 实施文件清单 | `docs/superpowers/specs/stories/*-qa-checklist.md` |
-| 7. 状态推进 | 用户 | 用户手动验证 QA 清单 → 通过则更新 Story 状态为 ✅ Done | 修改 Story 文件头部 Status |
+| 1. 需求澄清 | 用户 + Claude | `superpowers:brainstorming` skill，一题一题问 | 上下文 |
+| 2. 项目调研 | **Analyst** | `/analyst` 切换人格 → `*help` 看任务列表 | `docs/superpowers/specs/*-brief.md` |
+| 3. PRD | **PM** | `/pm` → `*create-prd` | `docs/superpowers/specs/*-prd.md` |
+| 4. 架构决策 | **Architect** | `/architect` → `*create-architecture` | `docs/superpowers/architecture/*.md` |
+| 5. Epic 切分 / Sharding | **PO** | `/po` → `*shard-doc` | `docs/superpowers/specs/epics/` |
+| 6. Story 打包 | **SM** | `/sm` → `*create-story` | `docs/superpowers/specs/stories/story-X.Y-*.md` |
+| 7. 实施 | **Dev** | `/dev` 或直接由当前 Claude 写代码 | 源码变更 |
+| 8. 验收 | **QA** | `/qa` → `*review-story` | `docs/superpowers/specs/stories/*-qa-checklist.md` |
+| 9. 状态推进 | 用户 | 用户手动验证 → 通过则更新 Story Status 为 ✅ Done | 修改 Story 文件头 |
 
 ### 关键约束
 
-- **Sub-agent 冷启动**：每个被调度的 agent 不知道父 Agent 的对话上下文。父 Agent 必须把 `要读的文件路径` + `要决策的具体问题` 全部塞进 prompt。
-- **不要让 sub-agent 做 Dev 的工作**：写代码必须由父 Agent 完成，因为修改代码需要持续看到项目其他部分的影响面。Sub-agent 写代码会因上下文不足产生不一致。
-- **Architect 用 `Plan` subagent_type**：Plan agent 是只读的，刚好对应"架构师不写代码只决策"的角色定位；其输出由父 Agent 落盘。
-- **PM / SM / QA 用 `general-purpose`**：因为这三个角色需要写文件（PRD / Story / 验收清单）。
+- **Slash 命令切换人格后会停留**：`/pm` 后当前 Claude 变成 PM John，会一直保持人格直到你换话题或 `/clear`。每个角色的 `*help` 命令会列出该角色的所有子任务（如 `*create-prd`、`*brainstorm`）。
+- **不要在多个角色间来回跳**：BMAD 设计是「一段时间专注一个角色」，反复切换会失去上下文。完成一个角色的产出 → 提交 → 再切下一个。
+- **`/dev` vs 直接写代码的取舍**：`/dev` 适合大块 Story 的标准化执行（会自动读 Story 文件、按 AC 实现）；如果你已经在和当前 Claude 协作，直接让它写也行——两种都可以。
+- **配置文件**：`.bmad-core/bmad-core-config.yml` 控制输出路径、文档命名等。BMAD 升级时可能覆盖，自定义需谨慎。
 
 ### 跳过流程的判断
 
 | 任务规模 | 推荐流程 |
 |---|---|
-| 单文件 < 30 行改动 | 父 Agent 直接做，跳过 BMAD |
-| 单端功能（仅 iOS 或仅 Android） | brainstorming → PM → Dev → QA，跳过 Architect 和 SM |
-| 跨 2 端及以上 | 完整 BMAD 流程 |
-| 涉及新平台 / 新 Backend extractor | 完整 BMAD 流程 + 必须 Architect 决策 |
+| 单文件 < 30 行改动 | 直接做，跳过 BMAD |
+| 单端功能（仅 iOS 或仅 Android） | `superpowers:brainstorming` → `/pm` → 直接 Dev → `/qa` |
+| 跨 2 端及以上 | 完整流程：`/analyst` → `/pm` → `/architect` → `/sm` → Dev → `/qa` |
+| 涉及新平台 / 新 Backend extractor | 完整流程 + 必须经 `/architect` 决策 |
 
 ### 参考实施案例
 
-- **Story 7.1（iOS 剪贴板自动读取）：** 采用 brainstorming + 直接实施（单端，跳过完整流程）
-- **Story 8.1（Android + Flutter 对等）：** 完整走 PM → Architect → SM → Dev → QA 流程，作为 BMAD SOP 的样板
+- **Story 7.1（iOS 剪贴板自动读取）**：采用 `superpowers:brainstorming` + 直接实施（单端，跳过完整流程）。
+- **Story 8.1（Android + Flutter 对等）**：在切换到官方 BMAD 之前，用自建的 Agent 派遣方式跑过一次完整 PM → Architect → SM → Dev → QA 流程，文档保留在 `docs/superpowers/` 下作为参考案例。
+
+### BMAD 升级
+
+```bash
+bmad update          # 升级 .bmad-core/ 及对应 slash 命令
+bmad status          # 查看当前安装版本
+bmad list            # 列出所有可用 agent
+```
