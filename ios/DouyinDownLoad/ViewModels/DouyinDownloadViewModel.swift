@@ -26,6 +26,8 @@ class DouyinDownloadViewModel: ObservableObject {
 
     private let service = DouyinDownloadService.shared
     private var downloadTask: Task<Void, Never>?
+    /// 最近一次自动粘贴消费过的剪贴板内容，避免重复回填
+    private var lastAutoPastedClipboard: String?
 
     // MARK: - 公共方法
 
@@ -135,10 +137,35 @@ class DouyinDownloadViewModel: ObservableObject {
     }
 
     /// 从剪贴板粘贴（Mac Catalyst 下 UIPasteboard 自动桥接 macOS 剪贴板）
+    /// 手动点击粘贴按钮：填入剪贴板内容后立即触发下载
     func pasteFromClipboard() {
-        if let clipboardString = UIPasteboard.general.string {
-            inputText = clipboardString
+        guard let clipboardString = UIPasteboard.general.string else { return }
+        let trimmed = clipboardString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        inputText = trimmed
+        lastAutoPastedClipboard = trimmed
+        if trimmed.range(of: #"https?://"#, options: .regularExpression) != nil {
+            processInput()
         }
+    }
+
+    /// App 进入前台时尝试自动回填剪贴板里的分享链接，并直接触发下载
+    /// 规则：1) 必须包含 http(s) 链接；2) 与当前输入或上次自动粘贴的内容不同；3) 没有正在下载
+    func autoPasteFromClipboardIfNeeded() {
+        guard !isLoading else { return }
+        guard UIPasteboard.general.hasStrings else { return }
+        guard let raw = UIPasteboard.general.string else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard trimmed.range(of: #"https?://"#, options: .regularExpression) != nil else { return }
+        if trimmed == lastAutoPastedClipboard { return }
+        if trimmed == inputText.trimmingCharacters(in: .whitespacesAndNewlines) { return }
+
+        inputText = trimmed
+        lastAutoPastedClipboard = trimmed
+        errorMessage = nil
+        saveResult = nil
+        processInput()
     }
 
     /// 清空输入
