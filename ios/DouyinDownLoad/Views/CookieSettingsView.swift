@@ -3,10 +3,27 @@ import SwiftUI
 struct CookieSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var cookieValues: [String: [String: String]] = [:]
+    @AppStorage(AppSettings.autoSaveKey) private var autoSaveToLibrary: Bool = false
 
     var body: some View {
         NavigationView {
             List {
+                Section {
+                    Toggle(isOn: $autoSaveToLibrary) {
+                        Label {
+                            Text("自动保存到相册")
+                        } icon: {
+                            Image(systemName: "photo.badge.arrow.down.fill")
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                } header: {
+                    Text("通用")
+                } footer: {
+                    Text("开启后，下载完成会自动归档到相册（或 Mac 下载目录），无需手动点保存。首次需授权相册访问权限。")
+                        .font(.caption2)
+                }
+
                 Section {
                     NavigationLink {
                         LocationManagerView()

@@ -168,7 +168,7 @@ private enum NeoCyber {
     static let label = Font.system(.subheadline, design: .rounded).weight(.semibold)
 }
 
-// MARK: - 动态宇宙背景
+// MARK: - 动态宇宙背景（统一为单 TimelineView + Canvas 离屏合成，避免多层 SwiftUI diff）
 
 private struct NeoCyberBackground: View {
     var body: some View {
@@ -180,40 +180,63 @@ private struct NeoCyberBackground: View {
             )
             .ignoresSafeArea()
 
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                ZStack {
-                    // 双层呼吸光晕
-                    RadialGradient(
-                        colors: [NeoCyber.cyan.opacity(0.35), .clear],
-                        center: UnitPoint(x: 0.2 + 0.1 * CGFloat(sin(t * 0.3)),
-                                          y: 0.15 + 0.05 * CGFloat(cos(t * 0.4))),
-                        startRadius: 0,
-                        endRadius: 360
-                    )
-                    .blendMode(.plusLighter)
-
-                    RadialGradient(
-                        colors: [NeoCyber.magenta.opacity(0.28), .clear],
-                        center: UnitPoint(x: 0.85 + 0.1 * CGFloat(cos(t * 0.25)),
-                                          y: 0.9 + 0.05 * CGFloat(sin(t * 0.35))),
-                        startRadius: 0,
-                        endRadius: 420
-                    )
-                    .blendMode(.plusLighter)
-                }
-            }
-            .ignoresSafeArea()
-
-            // 等距网格
+            // 等距网格静态层：不绑定 TimelineView，不会随帧重绘
             GridLines()
                 .stroke(NeoCyber.cyan.opacity(0.08), lineWidth: 0.5)
                 .ignoresSafeArea()
-
-            // 噪点 / 扫描线（顶层）
-            ScanlineOverlay()
-                .ignoresSafeArea()
                 .allowsHitTesting(false)
+
+            // 单个 TimelineView 驱动光晕 + 扫描线，限制 20fps 足够丝滑
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: false)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                Canvas { ctx, size in
+                    // 青色光晕
+                    let cyanCenter = CGPoint(
+                        x: size.width * (0.2 + 0.08 * CGFloat(sin(t * 0.3))),
+                        y: size.height * (0.18 + 0.05 * CGFloat(cos(t * 0.4)))
+                    )
+                    let cyanRect = CGRect(
+                        x: cyanCenter.x - 360, y: cyanCenter.y - 360,
+                        width: 720, height: 720
+                    )
+                    ctx.drawLayer { layerCtx in
+                        layerCtx.fill(
+                            Path(ellipseIn: cyanRect),
+                            with: .radialGradient(
+                                Gradient(colors: [NeoCyber.cyan.opacity(0.35), .clear]),
+                                center: cyanCenter, startRadius: 0, endRadius: 360
+                            )
+                        )
+                    }
+                    // 品红光晕
+                    let magCenter = CGPoint(
+                        x: size.width * (0.85 + 0.08 * CGFloat(cos(t * 0.25))),
+                        y: size.height * (0.88 + 0.05 * CGFloat(sin(t * 0.35)))
+                    )
+                    let magRect = CGRect(
+                        x: magCenter.x - 420, y: magCenter.y - 420,
+                        width: 840, height: 840
+                    )
+                    ctx.drawLayer { layerCtx in
+                        layerCtx.fill(
+                            Path(ellipseIn: magRect),
+                            with: .radialGradient(
+                                Gradient(colors: [NeoCyber.magenta.opacity(0.28), .clear]),
+                                center: magCenter, startRadius: 0, endRadius: 420
+                            )
+                        )
+                    }
+                    // 扫描线
+                    let bandY = (CGFloat(t.truncatingRemainder(dividingBy: 6)) / 6) * size.height
+                    ctx.fill(
+                        Path(CGRect(x: 0, y: bandY, width: size.width, height: 1.5)),
+                        with: .color(NeoCyber.cyan.opacity(0.06))
+                    )
+                }
+                .drawingGroup() // 强制 Metal 离屏合成，避免主线程 layout
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
     }
 }
@@ -235,19 +258,6 @@ private struct GridLines: Shape {
             y += step
         }
         return p
-    }
-}
-
-private struct ScanlineOverlay: View {
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            Canvas { ctx, size in
-                let bandY = (CGFloat(t.truncatingRemainder(dividingBy: 6)) / 6) * size.height
-                let rect = CGRect(x: 0, y: bandY, width: size.width, height: 1.5)
-                ctx.fill(Path(rect), with: .color(NeoCyber.cyan.opacity(0.06)))
-            }
-        }
     }
 }
 
@@ -294,7 +304,7 @@ private struct NeonProgressRing: View {
     var size: CGFloat = 200
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: false)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
             let spin = Angle.degrees((t.truncatingRemainder(dividingBy: 4)) / 4 * 360)
             let reverseSpin = Angle.degrees(-(t.truncatingRemainder(dividingBy: 6)) / 6 * 360)
@@ -369,23 +379,24 @@ private struct NeonProgressRing: View {
                             )
                             .monospacedDigit()
                             .shadow(color: NeoCyber.cyan.opacity(0.8), radius: 12)
-                        Text("PERCENT")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .tracking(4)
+                        Text("进 度")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .tracking(6)
                             .foregroundColor(NeoCyber.textMuted)
                     } else {
                         Image(systemName: "antenna.radiowaves.left.and.right")
                             .font(.system(size: 30, weight: .semibold))
                             .foregroundStyle(NeoCyber.cyan)
                             .symbolEffect(.variableColor.iterative.reversing)
-                        Text("PARSING")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .tracking(4)
-                            .foregroundColor(NeoCyber.textMuted)
+                        Text("解 析")
+                            .font(.system(size: 14, weight: .black, design: .rounded))
+                            .tracking(8)
+                            .foregroundColor(NeoCyber.cyan)
                     }
                 }
                 .scaleEffect(pulse)
             }
+            .drawingGroup()
         }
     }
 
@@ -537,10 +548,10 @@ struct DouyinDownloadView: View {
                             .fill(NeoCyber.lime)
                             .frame(width: 8, height: 8)
                             .shadow(color: NeoCyber.lime.opacity(0.9), radius: 6)
-                        Text("NEXUS · v1")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .tracking(2)
-                            .foregroundColor(NeoCyber.textMuted)
+                        Text("灵 枢 · 壹")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .tracking(3)
+                            .foregroundColor(NeoCyber.textPrimary)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -578,10 +589,10 @@ struct DouyinDownloadView: View {
                         HStack(spacing: 8) {
                             Circle().fill(NeoCyber.lime).frame(width: 8, height: 8)
                                 .shadow(color: NeoCyber.lime.opacity(0.9), radius: 6)
-                            Text("NEXUS · v1")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .tracking(2)
-                                .foregroundColor(NeoCyber.textMuted)
+                            Text("灵 枢 · 壹")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .tracking(3)
+                                .foregroundColor(NeoCyber.textPrimary)
                         }
                         Spacer()
                         Button {
@@ -631,8 +642,8 @@ struct DouyinDownloadView: View {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(NeoCyber.amber)
-                Text("MEDIA · DECRYPT · ENGINE")
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                Text("媒 体 · 解 析 · 引 擎")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .tracking(3)
                     .foregroundColor(NeoCyber.amber)
             }
@@ -642,7 +653,7 @@ struct DouyinDownloadView: View {
                 Capsule().stroke(NeoCyber.amber.opacity(0.6), lineWidth: 1)
             )
 
-            Text("无水印\n下载控制台")
+            Text("无 水 印\n下载控制台")
                 .font(.system(size: isMac ? 34 : 38, weight: .black, design: .rounded))
                 .foregroundStyle(
                     LinearGradient(
@@ -651,11 +662,13 @@ struct DouyinDownloadView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .lineSpacing(2)
+                .lineSpacing(4)
+                .tracking(2)
                 .shadow(color: NeoCyber.cyan.opacity(0.4), radius: 12)
 
-            Text("// 粘贴链接 · 自动解析 · 一键直取")
-                .font(.system(size: 12, design: .monospaced))
+            Text("粘贴链接 · 自动解析 · 一键直取")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .tracking(1)
                 .foregroundColor(NeoCyber.textMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -703,18 +716,18 @@ struct DouyinDownloadView: View {
     private var inputSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("LINK_INPUT")
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                Text("链 接 · 入 口")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .tracking(3)
-                    .foregroundColor(NeoCyber.cyan.opacity(0.8))
+                    .foregroundColor(NeoCyber.cyan)
                 Spacer()
                 if !viewModel.inputText.isEmpty {
                     Button(action: viewModel.clearInput) {
                         HStack(spacing: 4) {
                             Image(systemName: "xmark")
-                            Text("CLEAR")
+                            Text("清空")
                         }
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundColor(NeoCyber.magenta)
                     }
                 }
@@ -722,11 +735,11 @@ struct DouyinDownloadView: View {
 
             ZStack(alignment: .topLeading) {
                 if viewModel.inputText.isEmpty {
-                    Text("> paste share link here...")
-                        .font(.system(size: 14, design: .monospaced))
+                    Text("　在此粘贴分享链接 …")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(NeoCyber.textMuted.opacity(0.6))
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 14)
                         .allowsHitTesting(false)
                 }
                 TextEditor(text: $viewModel.inputText)
@@ -748,10 +761,10 @@ struct DouyinDownloadView: View {
                 Button(action: viewModel.pasteFromClipboard) {
                     HStack(spacing: 8) {
                         Image(systemName: "doc.on.clipboard.fill")
-                        Text("PASTE")
-                            .tracking(2)
+                        Text("粘 贴")
+                            .tracking(4)
                     }
-                    .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .foregroundColor(NeoCyber.cyan)
@@ -769,10 +782,10 @@ struct DouyinDownloadView: View {
                 Button(action: viewModel.processInput) {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.down.to.line")
-                        Text("DECRYPT")
-                            .tracking(2)
+                        Text("立 即 解 析")
+                            .tracking(3)
                     }
-                    .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .foregroundColor(.black)
@@ -798,17 +811,24 @@ struct DouyinDownloadView: View {
 
     // MARK: - 状态区
 
-    @ViewBuilder
     private var statusSection: some View {
-        if let error = viewModel.errorMessage {
-            errorView(error)
+        VStack(spacing: 14) {
+            if let error = viewModel.errorMessage {
+                errorView(error)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            if let result = viewModel.saveResult {
+                successView(result)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            if viewModel.isLoading {
+                downloadingPanel
+                    .transition(.opacity)
+            }
         }
-        if let result = viewModel.saveResult {
-            successView(result)
-        }
-        if viewModel.isLoading {
-            downloadingPanel
-        }
+        .animation(.easeOut(duration: 0.28), value: viewModel.isLoading)
+        .animation(.easeOut(duration: 0.28), value: viewModel.errorMessage)
+        .animation(.easeOut(duration: 0.28), value: viewModel.saveResult)
     }
 
     private var downloadingPanel: some View {
@@ -817,16 +837,17 @@ struct DouyinDownloadView: View {
                 Circle().fill(NeoCyber.magenta)
                     .frame(width: 8, height: 8)
                     .shadow(color: NeoCyber.magenta, radius: 6)
-                Text("TRANSMISSION · IN · PROGRESS")
-                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                    .tracking(2)
+                Text("信 号 传 输 中")
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .tracking(4)
                     .foregroundColor(NeoCyber.textPrimary)
                 Spacer()
-                Text("LIVE")
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                Text("实 时")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(2)
                     .foregroundColor(NeoCyber.magenta)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
                     .background(Capsule().stroke(NeoCyber.magenta.opacity(0.8), lineWidth: 1))
             }
 
@@ -837,20 +858,20 @@ struct DouyinDownloadView: View {
             DataStreamBar()
 
             HStack(spacing: 16) {
-                metric(label: "STATE",
-                       value: viewModel.downloadProgress == nil ? "PARSE" : "STREAM",
+                metric(label: "状 态",
+                       value: viewModel.downloadProgress == nil ? "解 析" : "传 输",
                        color: NeoCyber.cyan)
-                metric(label: "CHANNEL", value: "CDN-A1", color: NeoCyber.lime)
-                metric(label: "ENC", value: "H264", color: NeoCyber.amber)
+                metric(label: "通 道", value: "主 线 一", color: NeoCyber.lime)
+                metric(label: "编 码", value: "H · 264", color: NeoCyber.amber)
             }
 
             Button(action: viewModel.cancelDownload) {
                 HStack(spacing: 8) {
                     Image(systemName: "stop.fill")
-                    Text("ABORT")
-                        .tracking(3)
+                    Text("中 止 任 务")
+                        .tracking(4)
                 }
-                .font(.system(size: 12, weight: .black, design: .monospaced))
+                .font(.system(size: 13, weight: .black, design: .rounded))
                 .foregroundColor(NeoCyber.magenta)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -868,11 +889,12 @@ struct DouyinDownloadView: View {
     private func metric(label: String, value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .tracking(2)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(3)
                 .foregroundColor(NeoCyber.textMuted)
             Text(value)
-                .font(.system(size: 13, weight: .heavy, design: .monospaced))
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .tracking(1)
                 .foregroundColor(color)
                 .shadow(color: color.opacity(0.7), radius: 6)
         }
@@ -908,12 +930,13 @@ struct DouyinDownloadView: View {
                     )
                     .shadow(color: NeoCyber.cyan.opacity(0.6), radius: 14)
             }
-            Text("STANDBY")
-                .font(.system(size: 14, weight: .heavy, design: .monospaced))
-                .tracking(6)
+            Text("待 机 中")
+                .font(.system(size: 22, weight: .black, design: .rounded))
+                .tracking(10)
                 .foregroundColor(NeoCyber.textPrimary)
-            Text("// awaiting media payload")
-                .font(.system(size: 11, design: .monospaced))
+            Text("等 待 媒 体 载 入")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .tracking(4)
                 .foregroundColor(NeoCyber.textMuted)
         }
     }
@@ -952,9 +975,9 @@ struct DouyinDownloadView: View {
                 if !videoInfo.localImageURLs.isEmpty {
                     imageGalleryView(videoInfo.localImageURLs)
                         .padding(.horizontal, 24)
-                    Text("\(videoInfo.localImageURLs.count) FRAMES")
-                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                        .tracking(2)
+                    Text("共 \(videoInfo.localImageURLs.count) 张")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .tracking(3)
                         .foregroundColor(NeoCyber.textMuted)
                     saveButton
                         .padding(.horizontal, 24)
@@ -969,9 +992,9 @@ struct DouyinDownloadView: View {
             HStack(spacing: 8) {
                 Circle().fill(NeoCyber.lime).frame(width: 8, height: 8)
                     .shadow(color: NeoCyber.lime, radius: 6)
-                Text(videoInfo.mediaType == .video ? "VIDEO · PAYLOAD" : "IMAGE · PAYLOAD")
-                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                    .tracking(2)
+                Text(videoInfo.mediaType == .video ? "视 频 · 载 荷" : "图 集 · 载 荷")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .tracking(4)
                     .foregroundColor(NeoCyber.lime)
             }
 
@@ -996,9 +1019,9 @@ struct DouyinDownloadView: View {
                 }
             case .images:
                 if !videoInfo.localImageURLs.isEmpty {
-                    Text("\(videoInfo.localImageURLs.count) FRAMES")
-                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                        .tracking(2)
+                    Text("共 \(videoInfo.localImageURLs.count) 张")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .tracking(3)
                         .foregroundColor(NeoCyber.textMuted)
                     imageGalleryView(videoInfo.localImageURLs)
                         .frame(minHeight: 200)
@@ -1061,16 +1084,16 @@ struct DouyinDownloadView: View {
             Task { await viewModel.saveMedia() }
         }) {
             #if targetEnvironment(macCatalyst)
-            let saveLabel = "EXPORT · TO · DOWNLOADS"
+            let saveLabel = "导 出 · 至 · 下 载"
             #else
-            let saveLabel = "ARCHIVE · TO · LIBRARY"
+            let saveLabel = "归 档 · 至 · 相 册"
             #endif
             HStack(spacing: 8) {
                 Image(systemName: "tray.and.arrow.down.fill")
                 Text(saveLabel)
-                    .tracking(2)
+                    .tracking(4)
             }
-            .font(.system(size: 12, weight: .heavy, design: .monospaced))
+            .font(.system(size: 14, weight: .heavy, design: .rounded))
             .foregroundColor(.black)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -1095,12 +1118,12 @@ struct DouyinDownloadView: View {
                 .foregroundColor(NeoCyber.magenta)
                 .font(.system(size: 16))
             VStack(alignment: .leading, spacing: 2) {
-                Text("ERR · CODE")
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                    .tracking(2)
+                Text("错 误 提 示")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .tracking(3)
                     .foregroundColor(NeoCyber.magenta)
                 Text(message)
-                    .font(.system(size: 13, design: .rounded))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(NeoCyber.textPrimary)
             }
             Spacer(minLength: 0)
@@ -1115,12 +1138,12 @@ struct DouyinDownloadView: View {
                 .foregroundColor(NeoCyber.lime)
                 .font(.system(size: 16))
             VStack(alignment: .leading, spacing: 2) {
-                Text("OK · ARCHIVED")
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                    .tracking(2)
+                Text("已 归 档")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .tracking(4)
                     .foregroundColor(NeoCyber.lime)
                 Text(message)
-                    .font(.system(size: 13, design: .rounded))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(NeoCyber.textPrimary)
             }
             Spacer(minLength: 0)

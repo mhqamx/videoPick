@@ -29,6 +29,11 @@ class DouyinDownloadViewModel: ObservableObject {
     /// 最近一次自动粘贴消费过的剪贴板内容，避免重复回填
     private var lastAutoPastedClipboard: String?
 
+    /// 用户偏好：下载完成后是否自动保存到相册
+    private var autoSaveEnabled: Bool {
+        UserDefaults.standard.bool(forKey: AppSettings.autoSaveKey)
+    }
+
     // MARK: - 公共方法
 
     /// 处理输入并下载视频
@@ -68,6 +73,13 @@ class DouyinDownloadViewModel: ObservableObject {
             }
             videoInfo = info
             showPreview = true
+            isLoading = false
+            downloadProgress = nil
+            // 用户开启了自动保存，则下载完毕直接归档到相册
+            if autoSaveEnabled {
+                await saveMedia()
+            }
+            return
         } catch is CancellationError {
             // 用户主动取消，不显示错误
         } catch let error as DouyinDownloadError {
