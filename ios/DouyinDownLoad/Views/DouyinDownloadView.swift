@@ -179,23 +179,29 @@ struct DouyinDownloadView: View {
         }
     }
 
-    // MARK: - iOS 布局（保持原样）
+    // MARK: - iOS 布局
 
     private var phoneLayout: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    headerView
-                    inputSection
-                    statusSection
-                    if viewModel.showPreview, let videoInfo = viewModel.videoInfo {
-                        videoPreviewSection(videoInfo)
+            ZStack {
+                TechBackground()
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        headerView
+                        automationPanel
+                        inputSection
+                        statusSection
+                        if viewModel.showPreview, let videoInfo = viewModel.videoInfo {
+                            videoPreviewSection(videoInfo)
+                        }
                     }
-                    Spacer()
+                    .padding(.horizontal, 18)
+                    .padding(.top, 20)
+                    .padding(.bottom, 32)
                 }
-                .padding()
             }
-            .navigationTitle("短视频下载")
+            .navigationTitle("VideoPick")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -203,6 +209,7 @@ struct DouyinDownloadView: View {
                         showCookieSettings = true
                     } label: {
                         Image(systemName: "gearshape")
+                            .foregroundStyle(TechPalette.cyan)
                     }
                 }
             }
@@ -210,6 +217,7 @@ struct DouyinDownloadView: View {
                 CookieSettingsView()
             }
         }
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Mac 布局（双栏填充）
@@ -232,6 +240,8 @@ struct DouyinDownloadView: View {
 
                 headerView
 
+                automationPanel
+
                 inputSection
 
                 statusSection
@@ -240,11 +250,11 @@ struct DouyinDownloadView: View {
             }
             .padding(28)
             .frame(minWidth: 340, idealWidth: 400, maxWidth: 460)
-            .background(Color(white: 0.14))
+            .background(TechPalette.void)
 
             // 右栏：视频预览
             ZStack {
-                Color(white: 0.10)
+                TechBackground()
 
                 if viewModel.showPreview, let videoInfo = viewModel.videoInfo {
                     macPreviewSection(videoInfo)
@@ -259,90 +269,204 @@ struct DouyinDownloadView: View {
     // MARK: - 公共子视图
 
     private var headerView: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "video.circle.fill")
-                .font(.system(size: isMac ? 48 : 60))
-                .foregroundColor(.blue)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("VIDEO PICK")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TechPalette.amber)
 
-            Text("短视频无水印下载")
-                .font(isMac ? .title3 : .title2)
-                .fontWeight(.bold)
+                    Text("无水印捕获舱")
+                        .font(.system(size: isMac ? 28 : 34, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
 
-            Text("支持抖音、TikTok、Instagram、X、B站、快手、小红书分享链接")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+                    Text("抖音 / TikTok / Instagram / X / B站 / 快手 / 小红书")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TechPalette.mist)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                ZStack {
+                    Circle()
+                        .stroke(TechPalette.cyan.opacity(0.28), lineWidth: 1)
+                        .frame(width: 58, height: 58)
+                    Circle()
+                        .stroke(TechPalette.amber.opacity(0.55), lineWidth: 2)
+                        .frame(width: 42, height: 42)
+                    Image(systemName: "bolt.horizontal.circle.fill")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(TechPalette.cyan)
+                }
+                .accessibilityHidden(true)
+            }
+
+            HStack(spacing: 10) {
+                TechMetric(value: viewModel.isClipboardAutoDownloadEnabled ? "AUTO" : "MANUAL", label: "MODE")
+                TechMetric(value: viewModel.videoInfo?.mediaType == .images ? "IMAGE" : "VIDEO", label: "PAYLOAD")
+                TechMetric(value: viewModel.isLoading ? "LIVE" : "READY", label: "PIPE")
+            }
         }
-        .padding(.vertical, isMac ? 12 : 16)
+        .padding(18)
+        .techPanel()
+    }
+
+    private var automationPanel: some View {
+        let status = automationStatus
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .stroke(status.color.opacity(0.18), lineWidth: 8)
+                        .frame(width: 54, height: 54)
+                    Image(systemName: status.icon)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(status.color)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("剪贴板雷达")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text(status.detail)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(TechPalette.mist)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                Text(status.title)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(status.color)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(status.color.opacity(0.12), in: Capsule())
+                    .overlay(
+                        Capsule().stroke(status.color.opacity(0.35), lineWidth: 1)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    if viewModel.isClipboardAutoDownloadEnabled {
+                        viewModel.stopClipboardAutoDownload()
+                    } else {
+                        viewModel.startClipboardAutoDownloadIfNeeded(reason: "手动恢复")
+                    }
+                } label: {
+                    Label(
+                        viewModel.isClipboardAutoDownloadEnabled ? "关闭雷达" : "恢复雷达",
+                        systemImage: viewModel.isClipboardAutoDownloadEnabled ? "pause.fill" : "dot.radiowaves.left.and.right"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(TechPrimaryButtonStyle(color: status.color))
+                .disabled(viewModel.isLoading && !viewModel.isClipboardAutoDownloadEnabled)
+
+                Button(action: viewModel.pasteFromClipboard) {
+                    Image(systemName: "doc.on.clipboard")
+                        .frame(width: 46, height: 46)
+                }
+                .buttonStyle(TechIconButtonStyle())
+                .accessibilityLabel("粘贴")
+            }
+        }
+        .padding(16)
+        .techPanel(accent: status.color)
     }
 
     private var inputSection: some View {
-        VStack(spacing: 12) {
-            HStack {
-                TextField("粘贴分享链接...", text: $viewModel.inputText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "link.badge.plus")
+                    .foregroundStyle(TechPalette.cyan)
+                Text("手动链路")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+
+            ZStack(alignment: .topTrailing) {
+                TextField("粘贴分享链接", text: $viewModel.inputText, axis: .vertical)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white)
                     .lineLimit(3...6)
+                    .padding(14)
+                    .padding(.trailing, viewModel.inputText.isEmpty ? 0 : 34)
+                    .background(TechPalette.panel.opacity(0.86), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(TechPalette.cyan.opacity(0.22), lineWidth: 1)
+                    )
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
 
                 if !viewModel.inputText.isEmpty {
                     Button(action: viewModel.clearInput) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(TechPalette.mist)
+                            .padding(10)
                     }
+                    .accessibilityLabel("清空")
                 }
             }
 
             HStack(spacing: 12) {
-                Button(action: viewModel.pasteFromClipboard) {
-                    Label("粘贴", systemImage: "doc.on.clipboard")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
                 Button(action: viewModel.processInput) {
-                    Label("下载", systemImage: "arrow.down.circle.fill")
+                    Label("解析下载", systemImage: "arrow.down.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(TechPrimaryButtonStyle(color: TechPalette.cyan))
                 .disabled(viewModel.inputText.isEmpty || viewModel.isLoading)
             }
         }
-        .padding()
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(12)
+        .padding(16)
+        .techPanel()
     }
 
     @ViewBuilder
     private var statusSection: some View {
-        if let hint = viewModel.clipboardHint {
-            clipboardHintView(hint)
-        }
-
-        if let error = viewModel.errorMessage {
-            errorView(error)
-        }
-
-        if let result = viewModel.saveResult {
-            successView(result)
-        }
-
-        if viewModel.isLoading {
-            VStack(spacing: 8) {
-                if let progress = viewModel.downloadProgress {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                    Text("下载中 \(Int(progress * 100))%")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else {
-                    ProgressView("解析中...")
-                }
-
-                Button(action: viewModel.cancelDownload) {
-                    Label("取消", systemImage: "xmark.circle")
-                        .font(.subheadline)
-                        .foregroundColor(.red)
-                }
+        VStack(spacing: 10) {
+            if let hint = viewModel.clipboardHint {
+                clipboardHintView(hint)
             }
-            .padding()
+
+            if let error = viewModel.errorMessage {
+                errorView(error)
+            }
+
+            if let result = viewModel.saveResult {
+                successView(result)
+            }
+
+            if viewModel.isLoading {
+                VStack(spacing: 10) {
+                    if let progress = viewModel.downloadProgress {
+                        ProgressView(value: progress)
+                            .tint(TechPalette.cyan)
+                        Text("下载中 \(Int(progress * 100))%")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(TechPalette.mist)
+                    } else {
+                        ProgressView("解析中")
+                            .tint(TechPalette.cyan)
+                            .foregroundStyle(TechPalette.mist)
+                    }
+
+                    Button(action: viewModel.cancelDownload) {
+                        Label("取消", systemImage: "xmark.circle")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(TechPalette.warning)
+                }
+                .padding(14)
+                .techPanel(accent: TechPalette.cyan)
+            }
         }
     }
 
@@ -352,13 +476,13 @@ struct DouyinDownloadView: View {
         VStack(spacing: 16) {
             Image(systemName: "play.rectangle")
                 .font(.system(size: 64))
-                .foregroundColor(.gray.opacity(0.3))
+                .foregroundStyle(TechPalette.cyan.opacity(0.35))
             Text("视频预览区域")
                 .font(.title3)
-                .foregroundColor(.gray.opacity(0.4))
+                .foregroundStyle(TechPalette.mist)
             Text("粘贴链接并下载后，视频将在此处播放")
                 .font(.subheadline)
-                .foregroundColor(.gray.opacity(0.3))
+                .foregroundStyle(TechPalette.mist.opacity(0.7))
         }
     }
 
@@ -367,6 +491,7 @@ struct DouyinDownloadView: View {
             if let title = videoInfo.title {
                 Text(title)
                     .font(.headline)
+                    .foregroundStyle(.white)
                     .lineLimit(2)
                     .padding(.horizontal, 24)
                     .padding(.top, 20)
@@ -376,7 +501,7 @@ struct DouyinDownloadView: View {
             case .video:
                 if let localURL = videoInfo.localURL {
                     StableVideoPlayerView(url: localURL)
-                        .cornerRadius(12)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                         .padding(.horizontal, 24)
 
                     saveButton
@@ -404,17 +529,20 @@ struct DouyinDownloadView: View {
 
     private func videoPreviewSection(_ videoInfo: DouyinVideoInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(videoInfo.mediaType == .video ? "视频信息" : "图文信息")
-                .font(.headline)
+            HStack {
+                Image(systemName: videoInfo.mediaType == .video ? "play.rectangle.fill" : "photo.stack.fill")
+                    .foregroundStyle(TechPalette.amber)
+                Text(videoInfo.mediaType == .video ? "视频载荷" : "图文载荷")
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
 
             if let title = videoInfo.title {
-                HStack {
-                    Text("标题:")
-                        .foregroundColor(.secondary)
-                    Text(title)
-                        .lineLimit(2)
-                }
-                .font(.subheadline)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(TechPalette.mist)
+                    .lineLimit(3)
             }
 
             switch videoInfo.mediaType {
@@ -422,7 +550,11 @@ struct DouyinDownloadView: View {
                 if let localURL = videoInfo.localURL {
                     StableVideoPlayerView(url: localURL)
                         .frame(height: 300)
-                        .cornerRadius(12)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(TechPalette.cyan.opacity(0.24), lineWidth: 1)
+                        )
 
                     saveButton
                 }
@@ -430,7 +562,7 @@ struct DouyinDownloadView: View {
                 if !videoInfo.localImageURLs.isEmpty {
                     Text("共 \(videoInfo.localImageURLs.count) 张图片")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(TechPalette.mist)
 
                     imageGalleryView(videoInfo.localImageURLs)
                         .frame(height: 300)
@@ -439,9 +571,8 @@ struct DouyinDownloadView: View {
                 }
             }
         }
-        .padding()
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(12)
+        .padding(16)
+        .techPanel(accent: TechPalette.amber)
     }
 
     // MARK: - 图片缩略图网格
@@ -465,10 +596,10 @@ struct DouyinDownloadView: View {
                             .frame(minWidth: 80, minHeight: 80)
                             .aspectRatio(1, contentMode: .fill)
                             .clipped()
-                            .cornerRadius(8)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(TechPalette.panel.opacity(0.8))
                             .aspectRatio(1, contentMode: .fill)
                             .overlay(ProgressView())
                     }
@@ -496,55 +627,215 @@ struct DouyinDownloadView: View {
             #endif
             Label(saveLabel, systemImage: "square.and.arrow.down")
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(10)
         }
+        .buttonStyle(TechPrimaryButtonStyle(color: TechPalette.amber))
         .disabled(viewModel.isLoading)
     }
 
     private func errorView(_ message: String) -> some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.red)
+                .foregroundStyle(TechPalette.warning)
             Text(message)
-                .font(.subheadline)
-                .foregroundColor(.red)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(TechPalette.warning)
+                .lineLimit(3)
             Spacer()
         }
-        .padding()
-        .background(Color.red.opacity(0.1))
-        .cornerRadius(8)
+        .padding(14)
+        .techPanel(accent: TechPalette.warning)
     }
 
     private func clipboardHintView(_ message: String) -> some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "doc.on.clipboard.fill")
-                .foregroundColor(.blue)
+                .foregroundStyle(TechPalette.cyan)
             Text(message)
-                .font(.subheadline)
-                .foregroundColor(.blue)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(TechPalette.cyan)
+                .lineLimit(2)
             Spacer()
         }
-        .padding()
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(8)
+        .padding(14)
+        .techPanel(accent: TechPalette.cyan)
         .transition(.opacity)
     }
 
     private func successView(_ message: String) -> some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
+                .foregroundStyle(TechPalette.mint)
             Text(message)
-                .font(.subheadline)
-                .foregroundColor(.green)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(TechPalette.mint)
+                .lineLimit(2)
             Spacer()
         }
-        .padding()
-        .background(Color.green.opacity(0.1))
-        .cornerRadius(8)
+        .padding(14)
+        .techPanel(accent: TechPalette.mint)
+    }
+
+    private var automationStatus: (title: String, detail: String, icon: String, color: Color) {
+        switch viewModel.clipboardAutomationState {
+        case .idle:
+            return ("待授权", "手动模式", "dot.radiowaves.left.and.right", TechPalette.mist)
+        case .watching:
+            return ("监听中", "等待新链接", "waveform.path.ecg", TechPalette.cyan)
+        case .detecting:
+            return ("扫描", "读取剪贴板信号", "scope", TechPalette.cyan)
+        case .downloading:
+            return ("下载", "媒体流入站", "arrow.down.circle.fill", TechPalette.amber)
+        case .saving:
+            return ("保存", "写入相册", "photo.badge.checkmark", TechPalette.amber)
+        case .saved:
+            return ("完成", "已归档", "checkmark.seal.fill", TechPalette.mint)
+        case .failed:
+            return ("异常", "等待下一条链接", "exclamationmark.triangle.fill", TechPalette.warning)
+        }
+    }
+}
+
+private enum TechPalette {
+    static let void = Color(red: 0.02, green: 0.025, blue: 0.032)
+    static let panel = Color(red: 0.055, green: 0.075, blue: 0.085)
+    static let cyan = Color(red: 0.23, green: 0.88, blue: 0.93)
+    static let mint = Color(red: 0.35, green: 0.95, blue: 0.62)
+    static let amber = Color(red: 1.0, green: 0.68, blue: 0.25)
+    static let mist = Color(red: 0.70, green: 0.79, blue: 0.82)
+    static let warning = Color(red: 1.0, green: 0.34, blue: 0.30)
+}
+
+private struct TechBackground: View {
+    var body: some View {
+        ZStack {
+            TechPalette.void.ignoresSafeArea()
+
+            LinearGradient(
+                colors: [
+                    TechPalette.cyan.opacity(0.16),
+                    .clear,
+                    TechPalette.amber.opacity(0.10)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            CircuitGrid()
+                .stroke(TechPalette.cyan.opacity(0.11), lineWidth: 0.7)
+                .ignoresSafeArea()
+        }
+    }
+}
+
+private struct CircuitGrid: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let step: CGFloat = 28
+
+        var x: CGFloat = 0
+        while x <= rect.maxX {
+            path.move(to: CGPoint(x: x, y: rect.minY))
+            path.addLine(to: CGPoint(x: x, y: rect.maxY))
+            x += step
+        }
+
+        var y: CGFloat = 0
+        while y <= rect.maxY {
+            path.move(to: CGPoint(x: rect.minX, y: y))
+            path.addLine(to: CGPoint(x: rect.maxX, y: y))
+            y += step
+        }
+
+        return path
+    }
+}
+
+private struct TechMetric: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(TechPalette.mist.opacity(0.72))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(TechPalette.panel.opacity(0.82), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(TechPalette.cyan.opacity(0.14), lineWidth: 1)
+        )
+    }
+}
+
+private struct TechPanelModifier: ViewModifier {
+    let accent: Color
+
+    func body(content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .background(TechPalette.panel.opacity(0.68), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(
+                        LinearGradient(
+                            colors: [accent.opacity(0.55), TechPalette.mist.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: accent.opacity(0.10), radius: 16, x: 0, y: 8)
+    }
+}
+
+private extension View {
+    func techPanel(accent: Color = TechPalette.cyan) -> some View {
+        modifier(TechPanelModifier(accent: accent))
+    }
+}
+
+private struct TechPrimaryButtonStyle: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundStyle(TechPalette.void)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 46)
+            .background(color.opacity(configuration.isPressed ? 0.74 : 0.95), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.white.opacity(configuration.isPressed ? 0.18 : 0.35), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+    }
+}
+
+private struct TechIconButtonStyle: ButtonStyle {
+    var color: Color = TechPalette.cyan
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 18, weight: .bold))
+            .foregroundStyle(color)
+            .background(TechPalette.panel.opacity(configuration.isPressed ? 0.92 : 0.72), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(color.opacity(configuration.isPressed ? 0.55 : 0.28), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }
 }
 

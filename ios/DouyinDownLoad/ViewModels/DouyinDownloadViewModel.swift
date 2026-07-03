@@ -10,6 +10,16 @@ import SwiftUI
 import Combine
 import UIKit
 
+enum ClipboardAutomationState: Equatable {
+    case idle
+    case watching
+    case detecting
+    case downloading
+    case saving
+    case saved
+    case failed
+}
+
 @MainActor
 class DouyinDownloadViewModel: ObservableObject {
     // MARK: - 发布属性
@@ -22,13 +32,19 @@ class DouyinDownloadViewModel: ObservableObject {
     @Published var showPreview: Bool = false
     @Published var downloadProgress: Double?
     @Published var clipboardHint: String?
+    @Published var isClipboardAutoDownloadEnabled: Bool = ClipboardAutomationStartupPolicy.startsAutomatically
+    @Published var clipboardAutomationState: ClipboardAutomationState = ClipboardAutomationStartupPolicy.startsAutomatically ? .watching : .idle
 
     // MARK: - 私有属性
 
     private let service = DouyinDownloadService.shared
     private var downloadTask: Task<Void, Never>?
+    private var clipboardScanTask: Task<Void, Never>?
     private var lastClipboardContent: String?
+    private var lastAutoHandledFingerprint: String?
     private var clipboardHintDismissTask: Task<Void, Never>?
+    private var clipboardMonitorTask: Task<Void, Never>?
+    private var clipboardObserver: NSObjectProtocol?
 
     // MARK: - 公共方法
 
@@ -47,9 +63,14 @@ class DouyinDownloadViewModel: ObservableObject {
     /// 取消下载
     func cancelDownload() {
         downloadTask?.cancel()
+        clipboardScanTask?.cancel()
         downloadTask = nil
+        clipboardScanTask = nil
         isLoading = false
         downloadProgress = nil
+        if isClipboardAutoDownloadEnabled {
+            clipboardAutomationState = .watching
+        }
     }
 
     /// 下载视频
@@ -63,7 +84,7 @@ class DouyinDownloadViewModel: ObservableObject {
 
         do {
             let info = try await service.parseAndDownload(inputText) { [weak self] p in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     self?.downloadProgress = p
                 }
             }
@@ -145,15 +166,57 @@ class DouyinDownloadViewModel: ObservableObject {
         }
     }
 
-    /// Story 7.1：每次 App 进入前台时调用，若剪贴板内容与上次不同则自动填入并提示
-    func checkClipboardOnForeground() {
-        guard let clipboardString = UIPasteboard.general.string,
-              !clipboardString.isEmpty,
-              clipboardString != lastClipboardContent else { return }
+    /// 开启剪贴板自动捕获。首次读取剪贴板时，系统会在需要时展示粘贴板授权。
+    func authorizeClipboardAndStartAutoDownload() {
+        isClipboardAutoDownloadEnabled = true
+        clipboardAutomationState = .detecting
+        beginClipboardMonitoring()
+        scheduleClipboardScan(reason: "手动授权")
+    }
 
-        lastClipboardContent = clipboardString
-        inputText = clipboardString
-        showClipboardHint("已识别到剪贴板内容，已自动填入")
+    func startClipboardAutoDownloadIfNeeded(reason: String = "自动启动") {
+        guard ClipboardAutomationStartupPolicy.startsAutomatically else { return }
+        guard !isClipboardAutoDownloadEnabled else {
+            beginClipboardMonitoring()
+            scheduleClipboardScan(reason: reason)
+            return
+        }
+
+        isClipboardAutoDownloadEnabled = true
+        clipboardAutomationState = .detecting
+        beginClipboardMonitoring()
+        scheduleClipboardScan(reason: reason)
+    }
+
+    func stopClipboardAutoDownload() {
+        isClipboardAutoDownloadEnabled = false
+        clipboardAutomationState = .idle
+        downloadTask?.cancel()
+        clipboardMonitorTask?.cancel()
+        clipboardScanTask?.cancel()
+        downloadTask = nil
+        clipboardMonitorTask = nil
+        clipboardScanTask = nil
+        isLoading = false
+        downloadProgress = nil
+
+        if let clipboardObserver {
+            NotificationCenter.default.removeObserver(clipboardObserver)
+            self.clipboardObserver = nil
+        }
+
+        showClipboardHint("剪贴板雷达已关闭")
+    }
+
+    /// App 进入前台时调用：自动模式下扫描并尝试下载；手动模式下仅做轻提示。
+    func checkClipboardOnForeground() {
+        startClipboardAutoDownloadIfNeeded(reason: "前台唤醒")
+    }
+
+    func handleAuthorizedPaste(_ text: String) {
+        inputText = text
+        lastClipboardContent = text
+        authorizeClipboardAndStartAutoDownload()
     }
 
     private func showClipboardHint(_ message: String) {
@@ -193,6 +256,92 @@ class DouyinDownloadViewModel: ObservableObject {
             return "网络错误: 无法连接到服务器"
         default:
             return "网络错误: \(error.localizedDescription) (\(error.code.rawValue))"
+        }
+    }
+
+    private func beginClipboardMonitoring() {
+        if clipboardObserver == nil {
+            clipboardObserver = NotificationCenter.default.addObserver(
+                forName: UIPasteboard.changedNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard self?.isLoading == false else { return }
+                    self?.scheduleClipboardScan(reason: "剪贴板变化")
+                }
+            }
+        }
+
+        guard clipboardMonitorTask == nil else { return }
+        clipboardMonitorTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard let self, self.isClipboardAutoDownloadEnabled, !self.isLoading else { continue }
+                self.scheduleClipboardScan(reason: "定时扫描")
+            }
+        }
+    }
+
+    private func scheduleClipboardScan(reason: String) {
+        guard !isLoading else { return }
+        clipboardScanTask?.cancel()
+        clipboardScanTask = Task { @MainActor [weak self] in
+            await self?.scanClipboardForAutoDownload(reason: reason)
+        }
+    }
+
+    private func scanClipboardForAutoDownload(reason: String) async {
+        guard isClipboardAutoDownloadEnabled, !isLoading else { return }
+
+        clipboardAutomationState = .detecting
+        guard await pasteboardLikelyContainsWebURL() else {
+            clipboardAutomationState = .watching
+            return
+        }
+
+        guard let clipboardString = UIPasteboard.general.string,
+              let candidate = ClipboardAutoDownloadCandidate.resolve(
+                from: clipboardString,
+                lastHandledFingerprint: lastAutoHandledFingerprint
+              ) else {
+            clipboardAutomationState = .watching
+            return
+        }
+
+        lastClipboardContent = candidate.text
+        lastAutoHandledFingerprint = candidate.fingerprint
+        inputText = candidate.text
+        showClipboardHint("\(reason)捕获到新链接，正在自动下载并保存")
+
+        clipboardAutomationState = .downloading
+        await downloadVideo()
+
+        guard errorMessage == nil, videoInfo != nil else {
+            clipboardAutomationState = .failed
+            return
+        }
+
+        clipboardAutomationState = .saving
+        await saveMedia()
+
+        if errorMessage == nil {
+            clipboardAutomationState = .saved
+            showClipboardHint("已自动下载并保存到相册")
+        } else {
+            clipboardAutomationState = .failed
+        }
+    }
+
+    private func pasteboardLikelyContainsWebURL() async -> Bool {
+        guard UIPasteboard.general.hasStrings else { return false }
+
+        do {
+            let webURLPattern = \UIPasteboard.DetectedValues.probableWebURL
+            let patterns = try await UIPasteboard.general.detectedPatterns(for: [webURLPattern])
+            return patterns.contains(webURLPattern)
+        } catch {
+            return true
         }
     }
 }
