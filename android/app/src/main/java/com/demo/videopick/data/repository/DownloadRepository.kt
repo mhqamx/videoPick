@@ -80,17 +80,20 @@ class DownloadRepository(private val context: Context) {
     companion object {
         private const val TAG = "DownloadRepository"
         private val BACKEND_URLS = listOf(
-            "http://10.0.2.2:8000/resolve", // Android Emulator -> host localhost
-            "http://192.168.1.100:8000/resolve",
-            "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve",
+            // Keep in sync with iOS DouyinDownloadService.backendResolveURLs.
+            "https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/resolve",
         )
+        private const val IPHONE_UA =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        private const val DESKTOP_UA =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 
     private val douyinUrlPattern = Regex(
         """https?://[^\s]*(?:douyin\.com|iesdouyin\.com)[^\s]*""", RegexOption.IGNORE_CASE
     )
     private val xiaohongshuShortPattern = Regex(
-        """https?://xhslink\.com/(?:o/)?[a-zA-Z0-9_\-]+/?(?:\?[^\s]*)?""",
+        """https?://xhslink\.(?:com|cn)/(?:o/)?[a-zA-Z0-9_\-]+/?(?:\?[^\s]*)?""",
         RegexOption.IGNORE_CASE
     )
     private val xiaohongshuLongPattern = Regex(
@@ -152,7 +155,7 @@ class DownloadRepository(private val context: Context) {
         val candidate = genericUrlPattern.find(text)?.value?.let(::cleanupExtractedUrl)
         if (!candidate.isNullOrBlank()) {
             val lowered = candidate.lowercase()
-            if ("xiaohongshu.com" in lowered || "xhslink.com" in lowered) {
+            if ("xiaohongshu.com" in lowered || "xhslink.com" in lowered || "xhslink.cn" in lowered) {
                 return normalizeXiaohongshuInputUrl(candidate)
             }
         }
@@ -161,7 +164,12 @@ class DownloadRepository(private val context: Context) {
 
     private fun normalizeXiaohongshuInputUrl(url: String): String {
         val lower = url.lowercase()
-        return if (lower.startsWith("http://xhslink.com/") || lower.startsWith("http://www.xiaohongshu.com/")) {
+        return if (
+            lower.startsWith("http://xhslink.com/") ||
+            lower.startsWith("http://xhslink.cn/") ||
+            lower.startsWith("http://www.xiaohongshu.com/") ||
+            lower.startsWith("http://xiaohongshu.com/")
+        ) {
             "https://" + url.removePrefix("http://")
         } else {
             url
@@ -1991,52 +1999,118 @@ class DownloadRepository(private val context: Context) {
         onProgress: (Float) -> Unit,
     ): String {
         val start = System.currentTimeMillis()
-        logD("download.start fileName=$fileName url=$url")
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-            .header("Accept", "*/*")
-        applyPlatformDownloadHeaders(requestBuilder, url)
-        val request = requestBuilder.build()
+        val candidates = DownloadUrlFallback.candidates(url)
+        logD("download.start fileName=$fileName candidates=$candidates")
 
-        downloadClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("下载失败: HTTP ${response.code}")
-            val body = response.body ?: throw Exception("下载失败: 空响应")
-            logD("download.response status=${response.code} contentLength=${body.contentLength()}")
+        val cacheDir = File(context.cacheDir, "downloads")
+        if (!cacheDir.exists()) cacheDir.mkdirs()
+        val file = File(cacheDir, fileName)
 
-            val cacheDir = File(context.cacheDir, "downloads")
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            val file = File(cacheDir, fileName)
+        var lastStatusCode = -1
+        var lastError: Exception? = null
 
-            val totalBytes = body.contentLength()
-            var downloadedBytes = 0L
+        for ((index, candidate) in candidates.withIndex()) {
+            if (file.exists()) file.delete()
+            var receivedBytes = 0L
+            var totalBytes = -1L
+            var resumeAttempt = 0
 
-            FileOutputStream(file).use { fos ->
-                val buffer = ByteArray(65536)
-                val inputStream = body.byteStream()
-                while (true) {
-                    val read = inputStream.read(buffer)
-                    if (read == -1) break
-                    fos.write(buffer, 0, read)
-                    downloadedBytes += read
-                    if (totalBytes > 0) {
-                        onProgress(downloadedBytes.toFloat() / totalBytes)
+            while (resumeAttempt < 4) {
+                val requestBuilder = Request.Builder()
+                    .url(candidate)
+                    .header("Accept", "*/*")
+                    .header("Range", "bytes=$receivedBytes-")
+                applyPlatformDownloadHeaders(requestBuilder, candidate)
+                try {
+                    var statusRejected = false
+                    downloadClient.newCall(requestBuilder.build()).execute().use { response ->
+                        lastStatusCode = response.code
+                        logD("download.try[$index.$resumeAttempt] status=${response.code} url=$candidate")
+                        if (response.code !in 200..299) {
+                            statusRejected = true
+                            return@use
+                        }
+                        if (response.code == 200 && receivedBytes > 0L) {
+                            receivedBytes = 0L
+                            totalBytes = -1L
+                            if (file.exists()) file.delete()
+                        }
+                        response.header("Content-Range")
+                            ?.substringAfterLast("/", "")
+                            ?.toLongOrNull()
+                            ?.let { totalBytes = it }
+                        if (totalBytes <= 0L && response.code == 200) {
+                            val length = response.body?.contentLength() ?: -1L
+                            if (length > 0L) totalBytes = length
+                        }
+                        val body = response.body ?: throw Exception("下载失败: 空响应")
+                        FileOutputStream(file, receivedBytes > 0L).use { fos ->
+                            val buffer = ByteArray(65536)
+                            val inputStream = body.byteStream()
+                            while (true) {
+                                val read = inputStream.read(buffer)
+                                if (read == -1) break
+                                fos.write(buffer, 0, read)
+                                receivedBytes += read
+                                if (totalBytes > 0L) {
+                                    onProgress((receivedBytes.toFloat() / totalBytes).coerceAtMost(1f))
+                                }
+                            }
+                        }
                     }
+                    if (statusRejected) {
+                        lastError = Exception("下载失败: HTTP $lastStatusCode")
+                        break
+                    }
+                    if (receivedBytes <= 0L) {
+                        lastError = Exception("下载失败: 空文件")
+                        break
+                    }
+                    if (totalBytes > 0L && receivedBytes < totalBytes) {
+                        resumeAttempt += 1
+                        logW("download.try[$index] incomplete bytes=$receivedBytes/$totalBytes")
+                        continue
+                    }
+                    onProgress(1f)
+                    logD("download.success path=${file.absolutePath} bytes=$receivedBytes costMs=${System.currentTimeMillis() - start}")
+                    return file.absolutePath
+                } catch (e: Exception) {
+                    lastError = e
+                    logW("download.try[$index.$resumeAttempt] exception=${e.message} url=$candidate")
+                    if (isRetriableNetworkError(e) && receivedBytes > 0L) {
+                        resumeAttempt += 1
+                        continue
+                    }
+                    break
                 }
             }
-
-            onProgress(1f)
-            logD("download.success path=${file.absolutePath} bytes=$downloadedBytes costMs=${System.currentTimeMillis() - start}")
-            return file.absolutePath
         }
+
+        throw lastError ?: Exception("下载失败: HTTP $lastStatusCode")
+    }
+
+    private fun isRetriableNetworkError(error: Exception): Boolean {
+        return error is java.net.SocketTimeoutException ||
+            error is java.net.SocketException ||
+            error is java.io.InterruptedIOException
     }
 
     private fun applyPlatformDownloadHeaders(requestBuilder: Request.Builder, url: String) {
+        requestBuilder.header("User-Agent", IPHONE_UA)
+        requestBuilder.header("Referer", "https://www.douyin.com/")
+
         val host = try {
             java.net.URI(url).host?.lowercase()
         } catch (_: Exception) {
             null
         } ?: return
+
+        if (host.contains("bilibili") || host.contains("bilivideo") || host.contains("upos") || host.endsWith(".akamaized.net")) {
+            requestBuilder.header("User-Agent", DESKTOP_UA)
+            requestBuilder.header("Referer", "https://www.bilibili.com/")
+            logD("download.headers platform=bilibili")
+            return
+        }
 
         val isInstagramHost = host == "instagram.com" || host.endsWith(".instagram.com") ||
             host == "cdninstagram.com" || host.endsWith(".cdninstagram.com") ||
@@ -2061,6 +2135,12 @@ class DownloadRepository(private val context: Context) {
                 requestBuilder.header("Cookie", buildCookieHeader(xCookies))
             }
             logD("download.headers platform=x cookie=${if (xCookies.isNotEmpty()) "present" else "absent"}")
+            return
+        }
+
+        if (host.contains("xhscdn") || host.contains("xiaohongshu")) {
+            requestBuilder.header("Referer", "https://www.xiaohongshu.com/")
+            logD("download.headers platform=xiaohongshu")
             return
         }
 
