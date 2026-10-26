@@ -12,9 +12,10 @@
 
 ## 支持平台
 
-| 平台 | 链接格式 | 视频 | 图文 | 需要 Cookie |
+| 平台 | 链接格式 | 视频 | 图文 | 登录 / Cookie |
 |------|---------|------|------|-------------|
 | 抖音 | `v.douyin.com` / `www.douyin.com/video/` | ✅ | ✅ | 否 |
+| 微信视频号（原生 iOS / Android） | `weixin.qq.com/sph/` / `channels.weixin.qq.com/finder-preview/pages/sph?id=...` | ✅ | ❌ | App 内登录元宝，无需手填 Cookie |
 | TikTok | `vm.tiktok.com` / `www.tiktok.com/@user/video/` | ✅ | ❌ | 否 |
 | Instagram | `instagram.com/reel/` / `/p/` / `/tv/` | ✅ | ✅ | 是 |
 | X (Twitter) | `x.com/<user>/status/<id>` / `twitter.com/...` | ✅ | ✅ | 是 |
@@ -42,12 +43,40 @@
 | 平台 | iOS 本地 | Android 本地 | Flutter 本地 | React Native 本地 | Backend |
 |------|---------|-------------|-------------|-------------------|---------|
 | 抖音 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
+| 微信视频号 | ✅ 手机直接解析 | ✅ 手机直接解析 | 暂未接入 | 暂未接入 | 暂未接入 |
 | 小红书 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
 | 快手 | ✅ local-first | ✅ local-first | ✅ local-first | ✅ local-first | ✅ |
 | Instagram | ✅ local-only | ✅ local-only | ✅ local-only | ✅ local-only | ✅ |
 | X (Twitter) | ✅ local-only | ✅ local-only | ✅ local-only | ✅ local-only | ✅ |
 | TikTok | ❌ backend-only | ❌ backend-only | ❌ backend-only | ❌ backend-only | ✅ |
 | B站 | ❌ backend-only | ❌ backend-only | ❌ backend-only | ❌ backend-only | ✅ |
+
+## 微信视频号下载
+
+视频号已接入 **原生 iOS 和原生 Android 客户端**，手机直接完成登录、解析和下载，无需启动电脑服务、配置代理或安装证书。
+
+### 使用步骤
+
+1. 将视频号分享链接粘贴到 App，点击下载。支持以下两种链接格式：
+   - `https://weixin.qq.com/sph/<分享ID>`
+   - `https://channels.weixin.qq.com/finder-preview/pages/sph?id=<分享ID>`
+2. 首次使用或登录过期时，App 会打开元宝官方登录页；按页面提示完成登录。
+3. 登录验证成功后自动继续下载，也可以点击“我已登录，继续”手动确认。
+4. 下载完成后预览并保存到相册。开启剪贴板自动模式时，会继续自动下载和保存。
+
+设置中的“视频号”区域支持登录、重新登录和退出。取消登录不会继续下载，也不会覆盖之前保存的账号。每台设备需自行登录，电脑浏览器或其他手机的登录状态不会自动同步。
+
+### 支持范围与隐私
+
+- 当前支持普通视频分享；暂不支持直播、账号主页、无播放权限或需要额外解密的资源。
+- 优先选择 H.264，清晰度由分享接口决定，不保证原画；上游接口变化可能影响解析。
+- 登录信息保存在本机：iOS 使用 Keychain，Android 使用 Keystore 加密存储；不会发送给项目 backend 或视频 CDN。
+- 签名密钥、个人部署地址、登录凭据与本机配置不纳入版本控制。
+- Flutter、React Native 和 backend 尚未接入视频号。
+
+iOS 真机分享链接下载已验证；Android 已通过构建、单元测试及 Kotlin 真实解析下载验证，网页登录和相册保存仍需 Android 装机验收。
+
+详细说明：[iOS 视频号使用与验证](./ios/WECHAT_CHANNELS.md) · [Android 视频号使用与验证](./android/WECHAT_CHANNELS.md)。协议参考：[wx_channels_download](https://github.com/ltaoo/wx_channels_download)。
 
 ## 环境要求
 
@@ -202,6 +231,8 @@ cd android
 
 Instagram 和 X 需要在客户端 Cookie 设置页填入认证信息。
 
+视频号通过 App 内的元宝官方页面登录，不需要导出或手动填写 Cookie，具体操作见上方“微信视频号下载”。
+
 Backend 也支持读取 cookie 文件：
 
 - Instagram：`backend/cookies/www.instagram.com_cookies.txt`
@@ -216,6 +247,7 @@ export X_COOKIE_FILE="path/to/x_cookies.txt"
 
 ## 当前新增内容
 
+- 原生 iOS / Android 新增视频号独立解析下载、App 内元宝登录、登录恢复及会话管理
 - 新增 `react-native/` 客户端工程，补齐 Android / iOS 双端基础结构
 - README 补充 Flutter 与 React Native 的环境搭建说明
 - Android 图标资源同步到 Flutter 与 React Native 工程
@@ -233,6 +265,7 @@ export X_COOKIE_FILE="path/to/x_cookies.txt"
 
 ## 已知限制
 
+- 视频号仅接入原生 iOS / Android，依赖有效的元宝登录状态，支持范围见“微信视频号下载”
 - TikTok / B站 仍依赖 backend 解析
 - B站当前仅支持可直接下载的 MP4，DASH 分离流可能失败
 - 各平台页面结构会变化，解析逻辑需要持续跟进
