@@ -2,10 +2,11 @@
 //  DouyinDownloadService.swift
 //  DouyinDownLoad
 //
-//  Created by 马霄 on 2026/2/2.
+//  Created by VideoPick Contributors on 2026/2/2.
 //
 
 import Foundation
+import AVFoundation
 
 #if canImport(Photos)
 import Photos
@@ -20,10 +21,17 @@ import AppKit
 /// 抖音视频下载服务 (线程安全)
 actor DouyinDownloadService {
     static let shared = DouyinDownloadService()
-    private let backendResolveURLs: [URL] = [
-//        URL(string: "http://127.0.0.1:8000/resolve")!,
-        URL(string: "https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/resolve")!,
-    ]
+    private let channelsMediaSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        return URLSession(configuration: config, delegate: ChannelsRedirectGuard(), delegateQueue: nil)
+    }()
+    private let backendResolveURLs: [URL] = {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "VideoPickBackendURL") as? String,
+              let url = URL(string: raw), ["https", "http"].contains(url.scheme ?? ""), url.host != nil else { return [] }
+        return [url]
+    }()
 
     private init() {}
 
@@ -45,8 +53,16 @@ actor DouyinDownloadService {
         let isInstagram = extractedURL.map { isInstagramURL($0) } ?? false
         let isX = extractedURL.map { isXURL($0) } ?? false
         let isKuaishou = extractedURL.map { isKuaishouURL($0) } ?? false
+        let isChannels = extractedURL.map { ["weixin.qq.com", "channels.weixin.qq.com"].contains($0.host?.lowercased() ?? "") } ?? false
 
-        if isInstagram {
+        if isChannels {
+            guard let shareURL = extractedURL.flatMap(WeChatChannelsParser.normalizedShareURL) else {
+                throw WeChatChannelsError.unavailable("请使用视频号的分享链接（weixin.qq.com/sph/ 或视频号预览链接）")
+            }
+            let cookie = await YuanbaoSessionStore.shared.cookieHeader()
+            let media = try await WeChatChannelsService.shared.resolve(shareURL, cookie: cookie)
+            videoInfo = await DouyinVideoInfo(id: "channels_" + media.id, downloadURL: media.videoURL, title: media.title, coverURL: media.coverURL)
+        } else if isInstagram {
             log("detected instagram URL, local only (requires cookie)")
             videoInfo = try await resolveInstagramLocally(extractedURL!)
             log("local instagram resolve success")
@@ -100,11 +116,24 @@ actor DouyinDownloadService {
             }
         }
 
-        log("resolved media id: \(videoInfo.id), type: \(videoInfo.mediaType.rawValue), download url: \(videoInfo.downloadURL.absoluteString)")
+        log("resolved media id: \(videoInfo.id), type: \(videoInfo.mediaType.rawValue), download host: \(videoInfo.downloadURL.host ?? "")")
 
         switch videoInfo.mediaType {
         case .video:
             let localURL = try await downloadVideo(from: videoInfo.downloadURL, id: videoInfo.id, progress: progress)
+            if isChannels {
+                do {
+                    try Task.checkCancellation()
+                    let asset = AVURLAsset(url: localURL)
+                    let playable = try await asset.load(.isPlayable)
+                    let duration = try await asset.load(.duration)
+                    guard playable, duration.seconds.isFinite, duration.seconds > 0 else { throw WeChatChannelsError.unsupportedMedia }
+                } catch {
+                    try? FileManager.default.removeItem(at: localURL)
+                    if Task.isCancelled { throw CancellationError() }
+                    throw WeChatChannelsError.unsupportedMedia
+                }
+            }
             videoInfo.localURL = localURL
             log("parseAndDownload video success, local file: \(localURL.path)")
         case .images:
@@ -220,10 +249,10 @@ actor DouyinDownloadService {
         }
 
         let urlString = String(text[range])
-        log("extractURL matched: \(urlString)")
         guard let url = URL(string: urlString) else {
             throw DouyinDownloadError.invalidURL
         }
+        log("extractURL matched host: \(url.host ?? "")")
 
         return url
     }
@@ -430,8 +459,7 @@ actor DouyinDownloadService {
     }
 
     private func isXiaohongshuURL(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased() else { return false }
-        return host.contains("xiaohongshu.com") || host.contains("xhslink.com")
+        DownloadPlatformClassifier.isXiaohongshuURL(url)
     }
 
     private func isInstagramURL(_ url: URL) -> Bool {
@@ -813,7 +841,7 @@ actor DouyinDownloadService {
     /// 下载视频（流式写入，支持进度回调）
     func downloadVideo(from url: URL, id: String, progress: @Sendable (Double) -> Void = { _ in }) async throws -> URL {
         let candidates = candidateDownloadURLs(from: url)
-        log("downloadVideo start, id: \(id), candidates: \(candidates.map(\.absoluteString))")
+        log("downloadVideo start, id: \(id), candidate hosts: \(candidates.compactMap(\.host))")
 
         var lastStatusCode = -1
         var lastError: Error?
@@ -841,14 +869,15 @@ actor DouyinDownloadService {
                 applyPlatformDownloadHeaders(to: &request, targetURL: candidate)
 
                 do {
-                    let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+                    let session = WeChatChannelsParser.mediaURL(candidate.absoluteString) == nil ? URLSession.shared : channelsMediaSession
+                    let (asyncBytes, response) = try await session.bytes(for: request)
                     guard let httpResponse = response as? HTTPURLResponse else {
                         log("download attempt[\(index).\(resumeAttempt)] invalid response")
                         break
                     }
 
                     lastStatusCode = httpResponse.statusCode
-                    log("download attempt[\(index).\(resumeAttempt)] status: \(httpResponse.statusCode), expectedLength: \(httpResponse.expectedContentLength), url: \(candidate.absoluteString)")
+                    log("download attempt[\(index).\(resumeAttempt)] status: \(httpResponse.statusCode), expectedLength: \(httpResponse.expectedContentLength), host: \(candidate.host ?? "")")
 
                     guard (200..<300).contains(httpResponse.statusCode) else {
                         break
@@ -940,6 +969,7 @@ actor DouyinDownloadService {
     }
 
     private func candidateDownloadURLs(from url: URL) -> [URL] {
+        if WeChatChannelsParser.mediaURL(url.absoluteString) != nil { return [url] }
         var seen = Set<String>()
         var result: [URL] = []
 
@@ -2326,6 +2356,12 @@ actor DouyinDownloadService {
             forHTTPHeaderField: "User-Agent"
         )
         request.setValue("https://www.douyin.com/", forHTTPHeaderField: "Referer")
+
+        if WeChatChannelsParser.mediaURL(targetURL.absoluteString) != nil {
+            request.setValue("https://channels.weixin.qq.com/", forHTTPHeaderField: "Referer")
+            request.httpShouldHandleCookies = false
+            return
+        }
 
         // B站/UPOS 直链
         if host.contains("bilibili") || host.contains("bilivideo") || host.contains("upos") || host.hasSuffix(".akamaized.net") {

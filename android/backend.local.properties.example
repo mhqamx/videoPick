@@ -1,0 +1,2 @@
+# Copy to backend.local.properties to configure your own optional backend.
+resolveUrl=https://example.com/resolve

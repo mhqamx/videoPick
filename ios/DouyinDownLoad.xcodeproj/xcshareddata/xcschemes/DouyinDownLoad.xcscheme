@@ -51,10 +51,6 @@
             ReferencedContainer = "container:DouyinDownLoad.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <LocationScenarioReference
-         identifier = "../../DouyinDownLoad/Resources/GPX/&#x5927;&#x8fde;&#x4e2d;&#x5357;&#x5927;&#x53a6;.gpx"
-         referenceType = "0">
-      </LocationScenarioReference>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

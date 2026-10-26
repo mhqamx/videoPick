@@ -1,12 +1,20 @@
 package com.demo.videopick
 
 import android.content.Intent
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import com.demo.videopick.channels.YuanbaoLoginActivity
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,18 +65,34 @@ class MainActivity : ComponentActivity() {
 fun VideoPickApp(sharedText: String? = null) {
     val navController = rememberNavController()
     val viewModel: DownloadViewModel = viewModel()
+    val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    var loginLaunched by rememberSaveable { mutableStateOf(false) }
+    val loginLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        loginLaunched = false
+        viewModel.yuanbaoLoginFinished(it.resultCode == Activity.RESULT_OK)
+    }
+    LaunchedEffect(state.showYuanbaoLogin) {
+        if (state.showYuanbaoLogin && !loginLaunched) {
+            loginLaunched = true
+            loginLauncher.launch(Intent(context, YuanbaoLoginActivity::class.java))
+        }
+    }
     var editingLocation by remember { mutableStateOf<SavedLocation?>(null) }
 
-    if (sharedText != null) {
-        viewModel.updateInput(sharedText)
+    LaunchedEffect(sharedText) {
+        if (sharedText != null) {
+            viewModel.updateInput(sharedText)
+            viewModel.startClipboardAutoDownloadIfNeeded(reason = "分享入口")
+        }
     }
 
-    // Story 8.1.1: 前台切换自动读取剪贴板
+    // 前台切换时自动开启剪贴板雷达
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.checkClipboardOnForeground()
+                viewModel.startClipboardAutoDownloadIfNeeded(reason = "前台唤醒")
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -86,6 +110,7 @@ fun VideoPickApp(sharedText: String? = null) {
         }
         composable("cookie_settings") {
             CookieSettingsScreen(
+                onYuanbaoLogin = viewModel::requestYuanbaoLogin,
                 onBack = { navController.popBackStack() },
                 onNavigateToLocationManager = {
                     navController.navigate("location_manager")

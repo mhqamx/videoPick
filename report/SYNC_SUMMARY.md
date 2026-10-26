@@ -38,21 +38,21 @@
 ### Skill 文件 (douyin-download-kit)
 
 1. **SKILL.md** ✅
-   - 路径: `/Users/maxiao/.claude/skills/douyin-download-kit/SKILL.md`
+   - 路径: `/Users/your-user/.claude/skills/douyin-download-kit/SKILL.md`
    - 更新: 添加"最新更新"章节
    - 内容: 修复说明、技术改进、测试链接
 
 2. **troubleshooting.md** ✅
-   - 路径: `/Users/maxiao/.claude/skills/douyin-download-kit/references/troubleshooting.md`
+   - 路径: `/Users/your-user/.claude/skills/douyin-download-kit/references/troubleshooting.md`
    - 更新: 扩展"链接解析失败"章节
    - 内容: 详细调试指南、版本检查方法
 
 3. **CHANGELOG.md** ✅ (新建)
-   - 路径: `/Users/maxiao/.claude/skills/douyin-download-kit/references/CHANGELOG.md`
+   - 路径: `/Users/your-user/.claude/skills/douyin-download-kit/references/CHANGELOG.md`
    - 内容: 完整的版本历史和升级指南
 
 4. **DouyinDownloadService.swift** ✅ (已是最新)
-   - 路径: `/Users/maxiao/.claude/skills/douyin-download-kit/assets/DouyinDownloadKit/Sources/DouyinDownloadKit/DouyinDownloadService.swift`
+   - 路径: `/Users/your-user/.claude/skills/douyin-download-kit/assets/DouyinDownloadKit/Sources/DouyinDownloadKit/DouyinDownloadService.swift`
    - 状态: 已包含最新的解析逻辑
 
 ## 关键改进

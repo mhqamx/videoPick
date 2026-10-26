@@ -10,13 +10,13 @@
 ## 0. Files Reviewed (Static)
 
 ### Story 8.1.1 — Android
-- `/Users/maxiao/Desktop/videoPick/android/app/src/main/java/com/demo/videopick/viewmodel/DownloadViewModel.kt`
-- `/Users/maxiao/Desktop/videoPick/android/app/src/main/java/com/demo/videopick/MainActivity.kt`
-- `/Users/maxiao/Desktop/videoPick/android/app/src/main/java/com/demo/videopick/ui/screen/DownloadScreen.kt`
+- `/path/to/videoPick/android/app/src/main/java/com/demo/videopick/viewmodel/DownloadViewModel.kt`
+- `/path/to/videoPick/android/app/src/main/java/com/demo/videopick/MainActivity.kt`
+- `/path/to/videoPick/android/app/src/main/java/com/demo/videopick/ui/screen/DownloadScreen.kt`
 
 ### Story 8.1.2 — Flutter
-- `/Users/maxiao/Desktop/videoPick/flutter/lib/viewmodels/download_viewmodel.dart`
-- `/Users/maxiao/Desktop/videoPick/flutter/lib/widgets/status_section.dart`
+- `/path/to/videoPick/flutter/lib/viewmodels/download_viewmodel.dart`
+- `/path/to/videoPick/flutter/lib/widgets/status_section.dart`
 
 ---
 
@@ -78,7 +78,7 @@ Legend: ✅ Satisfied · ⚠️ Concern · ❌ Violation · ⏸ Cannot verify st
 
 ### 2.1 Android — Setup
 
-1. Open `/Users/maxiao/Desktop/videoPick/android/` in Android Studio (or a shell where `ANDROID_HOME` is set).
+1. Open `/path/to/videoPick/android/` in Android Studio (or a shell where `ANDROID_HOME` is set).
 2. Connect a device or start an emulator with **API 31+** (so we can also observe the Android 12+ clipboard toast — AC12).
 3. Build & install: `cd android && ./gradlew assembleDebug && ./gradlew installDebug`.
 4. Confirm the app launches without crash.
@@ -101,7 +101,7 @@ Legend: ✅ Satisfied · ⚠️ Concern · ❌ Violation · ⏸ Cannot verify st
 ### 2.3 Flutter — Setup
 
 1. Ensure `flutter` is in PATH on the user's machine.
-2. `cd /Users/maxiao/Desktop/videoPick/flutter`
+2. `cd /path/to/videoPick/flutter`
 3. `flutter pub get`
 4. `flutter analyze` — should print 0 new errors (warnings about pre-existing code are OK; new code should be clean).
 5. Run separately on **both** targets:

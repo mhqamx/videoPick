@@ -12,14 +12,30 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.demo.videopick.data.repository.CookieStore
+import com.demo.videopick.channels.YuanbaoSessionStore
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CookieSettingsScreen(
     onBack: () -> Unit,
     onNavigateToLocationManager: () -> Unit = {},
+    onYuanbaoLogin: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val yuanbao = remember { YuanbaoSessionStore(context) }
+    var hasYuanbaoSession by remember { mutableStateOf(yuanbao.hasSession()) }
+    var yuanbaoError by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) hasYuanbaoSession = yuanbao.hasSession()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Flat state map: "platform::fieldKey" -> value (nested MutableMap won't trigger recomposition)
     val cookieValues = remember {
@@ -70,6 +86,22 @@ fun CookieSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
         ) {
+            item(key = "yuanbao_session") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("视频号", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(if (hasYuanbaoSession) "已保存登录状态" else "尚未登录元宝")
+                    Button(onClick = onYuanbaoLogin) { Text(if (hasYuanbaoSession) "重新登录元宝" else "登录元宝") }
+                    if (hasYuanbaoSession) {
+                        TextButton(onClick = {
+                            try { yuanbao.clear(); hasYuanbaoSession = false; yuanbaoError = null }
+                            catch (error: Exception) { yuanbaoError = error.message }
+                        }) { Text("退出元宝登录") }
+                    }
+                    Text("首次登录后，粘贴视频号链接即可下载。登录信息加密保存在本机。", style = MaterialTheme.typography.bodySmall)
+                    yuanbaoError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    HorizontalDivider()
+                }
+            }
             item(key = "tools_header") {
                 Text(
                     text = "工具",

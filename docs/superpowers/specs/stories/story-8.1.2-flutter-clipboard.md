@@ -40,7 +40,7 @@
 
 ### 要修改的文件清单（绝对路径）
 
-1. `/Users/maxiao/Desktop/videoPick/flutter/lib/viewmodels/download_viewmodel.dart`
+1. `/path/to/videoPick/flutter/lib/viewmodels/download_viewmodel.dart`
    - 顶部 import 新增 `import 'dart:async';`（已存在）；新增 `import 'package:flutter/widgets.dart';`（如 `material.dart` 不足以暴露 `WidgetsBindingObserver` / `WidgetsBinding` / `AppLifecycleState`，实际 `material.dart` re-export 已包含，验证后决定是否需要额外 import）
    - 类签名改为 `class DownloadViewModel extends ChangeNotifier with WidgetsBindingObserver`
    - 新增 `static const String kClipboardHintText = '已识别到剪贴板内容，已自动填入';`
@@ -52,14 +52,14 @@
    - 新增 `void _showClipboardHint(String message)`（cancel-and-restart 3s Timer，触发 `notifyListeners()`）
    - **不**修改 `clearInput()` 中关于 `_lastClipboardContent` 的行为（AC14）
 
-2. `/Users/maxiao/Desktop/videoPick/flutter/lib/widgets/status_section.dart`
+2. `/path/to/videoPick/flutter/lib/widgets/status_section.dart`
    - 在 `Column` 的 `children` 列表头部（`errorMessage` 之前）新增条件 `if (vm.clipboardHint != null) _StatusCard(color: Colors.blue.shade50, textColor: Colors.blue.shade800, icon: Icons.content_paste, message: vm.clipboardHint!)`
    - 复用现有 `_StatusCard` 类，无需新增 widget 类
 
 ### 不要修改的文件（仅作为上下文阅读）
 
-- `/Users/maxiao/Desktop/videoPick/flutter/lib/views/download_page.dart` — `ChangeNotifierProvider` 注册无变化
-- `/Users/maxiao/Desktop/videoPick/flutter/lib/main.dart` — `WidgetsFlutterBinding.ensureInitialized()` 已存在（main.dart:5），生产环境前置条件已满足
+- `/path/to/videoPick/flutter/lib/views/download_page.dart` — `ChangeNotifierProvider` 注册无变化
+- `/path/to/videoPick/flutter/lib/main.dart` — `WidgetsFlutterBinding.ensureInitialized()` 已存在（main.dart:5），生产环境前置条件已满足
 
 ### 架构决策引用（章节锚点）
 

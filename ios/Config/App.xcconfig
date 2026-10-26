@@ -1,0 +1,5 @@
+// Public defaults. Private device signing and backend settings stay local.
+DEVELOPMENT_TEAM =
+PRODUCT_BUNDLE_IDENTIFIER = com.example.videopick
+VIDEOPICK_BACKEND_URL =
+#include? "Signing.local.xcconfig"

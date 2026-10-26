@@ -28,7 +28,7 @@
 
 **App 包位置**:
 ```
-/Users/maxiao/Library/Developer/Xcode/DerivedData/DouyinDownLoad-doxmnvdeyzdrwffuyqwbpbglvzdg/Build/Products/Debug-iphonesimulator/DouyinDownLoad.app
+/Users/your-user/Library/Developer/Xcode/DerivedData/DouyinDownLoad-doxmnvdeyzdrwffuyqwbpbglvzdg/Build/Products/Debug-iphonesimulator/DouyinDownLoad.app
 ```
 
 **App 包内容**:
@@ -139,7 +139,7 @@ DouyinDownLoad/
 xcrun simctl boot "iPhone 17 Pro"
 
 # 安装 App
-xcrun simctl install booted /Users/maxiao/Library/Developer/Xcode/DerivedData/DouyinDownLoad-doxmnvdeyzdrwffuyqwbpbglvzdg/Build/Products/Debug-iphonesimulator/DouyinDownLoad.app
+xcrun simctl install booted /Users/your-user/Library/Developer/Xcode/DerivedData/DouyinDownLoad-doxmnvdeyzdrwffuyqwbpbglvzdg/Build/Products/Debug-iphonesimulator/DouyinDownLoad.app
 
 # 启动 App
 xcrun simctl launch booted com.mx.DouyinDownLoad

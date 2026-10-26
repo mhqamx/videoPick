@@ -39,7 +39,7 @@
 
 ### 要修改的文件清单（绝对路径）
 
-1. `/Users/maxiao/Desktop/videoPick/android/app/src/main/java/com/demo/videopick/viewmodel/DownloadViewModel.kt`
+1. `/path/to/videoPick/android/app/src/main/java/com/demo/videopick/viewmodel/DownloadViewModel.kt`
    - 在 `UiState` 中新增 `val clipboardHint: String? = null`
    - 新增 `private var lastClipboardContent: String? = null`
    - 新增 `private var clipboardHintDismissJob: Job? = null`
@@ -47,12 +47,12 @@
    - 新增 `private fun showClipboardHint(message: String)`（cancel-and-restart 3s timer）
    - **不**修改 `clearInput()`（AC14）
 
-2. `/Users/maxiao/Desktop/videoPick/android/app/src/main/java/com/demo/videopick/MainActivity.kt`
+2. `/path/to/videoPick/android/app/src/main/java/com/demo/videopick/MainActivity.kt`
    - 在 `VideoPickApp` Composable 顶部添加：
      - `val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current`
      - `DisposableEffect(lifecycleOwner) { ... ON_RESUME -> viewModel.checkClipboardOnForeground() ... }`
 
-3. `/Users/maxiao/Desktop/videoPick/android/app/src/main/java/com/demo/videopick/ui/screen/DownloadScreen.kt`
+3. `/path/to/videoPick/android/app/src/main/java/com/demo/videopick/ui/screen/DownloadScreen.kt`
    - 在 `StatusSection(state, viewModel)` Composable 内新增 `state.clipboardHint?.let { ... }` 分支，渲染蓝色 `Card` + `Icons.Default.ContentPaste`
 
 ### 架构决策引用（章节锚点）

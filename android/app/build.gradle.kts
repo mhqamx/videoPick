@@ -14,10 +14,16 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+val backendLocalProperties = Properties().apply {
+    val localFile = rootProject.file("backend.local.properties")
+    if (localFile.exists()) localFile.inputStream().use { load(it) }
+}
+val backendResolveUrl = backendLocalProperties.getProperty("resolveUrl", "")
+    .replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
     namespace = "com.demo.videopick"
     compileSdk = 34
-    buildToolsVersion = "34.0.0"
 
     defaultConfig {
         applicationId = "com.demo.videopick"
@@ -25,6 +31,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "BACKEND_RESOLVE_URL", "\"$backendResolveUrl\"")
     }
 
     signingConfigs {
@@ -59,6 +66,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

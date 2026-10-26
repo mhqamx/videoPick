@@ -11,7 +11,7 @@ object GpxAssetImporter {
     data class Preset(val displayName: String, val assetPath: String)
 
     val presets = listOf(
-        Preset("大连中南大厦", "gpx/dalian_zhongnan.gpx"),
+        Preset("本地示例位置", "gpx/sample.local.gpx"),
     )
 
     fun load(context: Context, preset: Preset): SavedLocation? {

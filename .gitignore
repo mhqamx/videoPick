@@ -37,3 +37,12 @@ react-native/ios/build/
 react-native/ios/.xcode.env.local
 react-native/IOS_REACT_NATIVE_环境问题排查总结_*.md
 scripts/generated_icons/
+
+# Private mobile signing, account state, and location samples
+**/*.keystore
+**/*.jks
+**/*.p12
+**/*.mobileprovision
+**/*.gpx
+ios/Config/Signing.local.xcconfig
+android/backend.local.properties

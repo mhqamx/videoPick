@@ -1,11 +1,17 @@
 package com.demo.videopick.data.repository
 
+import com.demo.videopick.BuildConfig
 import android.content.ContentValues
 import android.content.Context
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.media.MediaMetadataRetriever
+import com.demo.videopick.channels.ChannelsException
+import com.demo.videopick.channels.WeChatChannelsParser
+import com.demo.videopick.channels.WeChatChannelsService
+import com.demo.videopick.channels.YuanbaoSessionStore
 import com.demo.videopick.data.model.MediaType
 import com.demo.videopick.data.model.ResolveRequest
 import com.demo.videopick.data.model.ResolveResponse
@@ -24,6 +30,7 @@ import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 class DownloadRepository(private val context: Context) {
+    private val channelsService = WeChatChannelsService()
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -79,24 +86,9 @@ class DownloadRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "DownloadRepository"
-        private val BACKEND_URLS = listOf(
-            "http://10.0.2.2:8000/resolve", // Android Emulator -> host localhost
-            "http://192.168.1.100:8000/resolve",
-            "https://super-halibut-r4r59wg9qw93pv6p-8000.app.github.dev/resolve",
-        )
+        private val BACKEND_URLS = listOf(BuildConfig.BACKEND_RESOLVE_URL).filter(String::isNotBlank)
     }
 
-    private val douyinUrlPattern = Regex(
-        """https?://[^\s]*(?:douyin\.com|iesdouyin\.com)[^\s]*""", RegexOption.IGNORE_CASE
-    )
-    private val xiaohongshuShortPattern = Regex(
-        """https?://xhslink\.com/(?:o/)?[a-zA-Z0-9_\-]+/?(?:\?[^\s]*)?""",
-        RegexOption.IGNORE_CASE
-    )
-    private val xiaohongshuLongPattern = Regex(
-        """https?://(?:www\.)?xiaohongshu\.com/(?:explore|discovery/item)/[a-zA-Z0-9_\-]+(?:\?[^\s]*)?""",
-        RegexOption.IGNORE_CASE
-    )
     private val instagramReelPattern = Regex(
         """https?://(?:www\.)?instagram\.com/reel/[A-Za-z0-9_-]+/?(?:\?[^\s]*)?""",
         RegexOption.IGNORE_CASE
@@ -140,32 +132,10 @@ class DownloadRepository(private val context: Context) {
     }
 
     private fun extractDouyinUrl(text: String): String? =
-        douyinUrlPattern.find(text)?.value?.let(::cleanupExtractedUrl)
+        DownloadPlatformClassifier.extractDouyinUrl(text)
 
     private fun extractXiaohongshuUrl(text: String): String? {
-        for (pattern in listOf(xiaohongshuShortPattern, xiaohongshuLongPattern)) {
-            val matched = pattern.find(text)?.value
-            if (!matched.isNullOrBlank()) {
-                return normalizeXiaohongshuInputUrl(cleanupExtractedUrl(matched))
-            }
-        }
-        val candidate = genericUrlPattern.find(text)?.value?.let(::cleanupExtractedUrl)
-        if (!candidate.isNullOrBlank()) {
-            val lowered = candidate.lowercase()
-            if ("xiaohongshu.com" in lowered || "xhslink.com" in lowered) {
-                return normalizeXiaohongshuInputUrl(candidate)
-            }
-        }
-        return null
-    }
-
-    private fun normalizeXiaohongshuInputUrl(url: String): String {
-        val lower = url.lowercase()
-        return if (lower.startsWith("http://xhslink.com/") || lower.startsWith("http://www.xiaohongshu.com/")) {
-            "https://" + url.removePrefix("http://")
-        } else {
-            url
-        }
+        return DownloadPlatformClassifier.extractXiaohongshuUrl(text)
     }
 
     private fun normalizeXiaohongshuMediaUrl(url: String): String =
@@ -237,7 +207,8 @@ class DownloadRepository(private val context: Context) {
 
     /**
      * Resolve then download media.
-     * Douyin links: local HTML parse first -> fallback to backend.
+     * Douyin links: local HTML parse first, backend fallback if the share page no longer
+     * exposes playable media data.
      * Other links: backend first.
      */
     suspend fun parseAndDownload(
@@ -245,6 +216,25 @@ class DownloadRepository(private val context: Context) {
         onProgress: (Float) -> Unit = {},
     ): VideoInfo {
         logD("parse.start inputLength=${text.length}")
+        // This branch deliberately completes before any backend/platform fallback.
+        WeChatChannelsParser.extract(text)?.let { share ->
+            if (WeChatChannelsParser.normalize(share) == null) throw ChannelsException("请使用视频号的普通视频分享链接")
+            val info = channelsService.resolve(share, YuanbaoSessionStore(context).cookieHeader())
+            val path = channelsService.download(info.downloadUrl, File(context.cacheDir, "downloads"), onProgress)
+            try {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(path)
+                    val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
+                    val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
+                    if (!hasVideo || duration <= 0) throw ChannelsException("下载内容不是可播放视频或格式暂不支持")
+                } finally { retriever.release() }
+            } catch (error: Exception) {
+                File(path).delete()
+                throw ChannelsException("下载内容不是可播放视频或格式暂不支持")
+            }
+            return info.copy(localPath = path)
+        }
         val douyinUrl = extractDouyinUrl(text)
         val instagramUrl = extractInstagramUrl(text)
         val xUrl = extractXUrl(text)
@@ -254,23 +244,14 @@ class DownloadRepository(private val context: Context) {
         var resolvePath = "unknown"
         val videoInfo = when {
             douyinUrl != null -> {
-                logD("parse.route platform=douyin strategy=local_first")
+                logD("parse.route platform=douyin strategy=local_only")
                 try {
                     val info = resolveDouyinLocally(douyinUrl)
                     resolvePath = "local:douyin"
                     info
                 } catch (localErr: Exception) {
-                    logW("parse.fallback platform=douyin reason=${localErr.message}")
-                    try {
-                        val info = resolveViaBackend(text)
-                        resolvePath = "backend_after_local_fail:douyin"
-                        info
-                    } catch (backendErr: Exception) {
-                        logE("parse.fail both_local_and_backend platform=douyin", backendErr)
-                        throw Exception(
-                            "抖音本地解析失败: ${localErr.message ?: "未知错误"}；服务端解析失败: ${backendErr.message ?: "未知错误"}"
-                        )
-                    }
+                    logE("parse.fail local_only platform=douyin", localErr)
+                    throw Exception("抖音本地解析失败: ${localErr.message ?: "未知错误"}")
                 }
             }
             instagramUrl != null -> {
@@ -433,7 +414,13 @@ class DownloadRepository(private val context: Context) {
         }
 
         // Fallback: 从 HTML 中直接提取播放链接
-        return parseFromRawHtml(html) ?: throw Exception("未找到视频数据")
+        parseFromRawHtml(html)?.let { return it }
+
+        val itemId = extractDouyinItemId(html)
+        if (!itemId.isNullOrBlank()) {
+            throw Exception("分享页仅返回作品ID($itemId)，未下发视频播放数据")
+        }
+        throw Exception("未找到视频数据")
     }
 
     /** 从 HTML 中提取 `varName = {...}` 赋值语句中的 JSON 对象 */
@@ -520,6 +507,20 @@ class DownloadRepository(private val context: Context) {
         } catch (_: Exception) {
             return null
         }
+    }
+
+    private fun extractDouyinItemId(html: String): String? {
+        val patterns = listOf(
+            Regex(""""itemId"\s*:\s*"(\d+)""""),
+            Regex(""""aweme_id"\s*:\s*"(\d+)""""),
+            Regex("""/(?:share/)?video/(\d+)"""),
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(html)
+            val itemId = match?.groupValues?.getOrNull(1)
+            if (!itemId.isNullOrBlank()) return itemId
+        }
+        return null
     }
 
     private fun isDouyinImagePost(item: JsonObject): Boolean {
@@ -1991,43 +1992,121 @@ class DownloadRepository(private val context: Context) {
         onProgress: (Float) -> Unit,
     ): String {
         val start = System.currentTimeMillis()
-        logD("download.start fileName=$fileName url=$url")
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-            .header("Accept", "*/*")
-        applyPlatformDownloadHeaders(requestBuilder, url)
-        val request = requestBuilder.build()
+        val candidates = candidateDownloadUrls(url)
+        logD("download.start fileName=$fileName candidates=$candidates")
 
-        downloadClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("下载失败: HTTP ${response.code}")
-            val body = response.body ?: throw Exception("下载失败: 空响应")
-            logD("download.response status=${response.code} contentLength=${body.contentLength()}")
+        var lastStatusCode = -1
+        var lastError: Exception? = null
 
-            val cacheDir = File(context.cacheDir, "downloads")
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            val file = File(cacheDir, fileName)
+        for ((index, candidate) in candidates.withIndex()) {
+            try {
+                val requestBuilder = Request.Builder()
+                    .url(candidate)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                    .header("Accept", "*/*")
+                    .header("Range", "bytes=0-")
+                applyPlatformDownloadHeaders(requestBuilder, candidate)
+                val request = requestBuilder.build()
 
-            val totalBytes = body.contentLength()
-            var downloadedBytes = 0L
-
-            FileOutputStream(file).use { fos ->
-                val buffer = ByteArray(65536)
-                val inputStream = body.byteStream()
-                while (true) {
-                    val read = inputStream.read(buffer)
-                    if (read == -1) break
-                    fos.write(buffer, 0, read)
-                    downloadedBytes += read
-                    if (totalBytes > 0) {
-                        onProgress(downloadedBytes.toFloat() / totalBytes)
+                downloadClient.newCall(request).execute().use { response ->
+                    lastStatusCode = response.code
+                    if (!response.isSuccessful) {
+                        logW("download.try[$index] failed status=${response.code} url=$candidate")
+                        return@use
                     }
-                }
-            }
+                    val body = response.body ?: throw Exception("下载失败: 空响应")
+                    logD("download.try[$index] response status=${response.code} contentLength=${body.contentLength()} url=$candidate")
 
-            onProgress(1f)
-            logD("download.success path=${file.absolutePath} bytes=$downloadedBytes costMs=${System.currentTimeMillis() - start}")
-            return file.absolutePath
+                    val cacheDir = File(context.cacheDir, "downloads")
+                    if (!cacheDir.exists()) cacheDir.mkdirs()
+                    val file = File(cacheDir, fileName)
+
+                    val totalBytes = body.contentLength()
+                    var downloadedBytes = 0L
+
+                    FileOutputStream(file).use { fos ->
+                        val buffer = ByteArray(65536)
+                        val inputStream = body.byteStream()
+                        while (true) {
+                            val read = inputStream.read(buffer)
+                            if (read == -1) break
+                            fos.write(buffer, 0, read)
+                            downloadedBytes += read
+                            if (totalBytes > 0) {
+                                onProgress(downloadedBytes.toFloat() / totalBytes)
+                            }
+                        }
+                    }
+
+                    if (downloadedBytes <= 0) {
+                        throw Exception("下载失败: 空文件")
+                    }
+
+                    onProgress(1f)
+                    logD("download.success path=${file.absolutePath} bytes=$downloadedBytes costMs=${System.currentTimeMillis() - start}")
+                    return file.absolutePath
+                }
+            } catch (e: Exception) {
+                lastError = e
+                logW("download.try[$index] exception=${e.message} url=$candidate")
+            }
+        }
+
+        lastError?.let { throw it }
+        throw Exception("下载失败: HTTP $lastStatusCode")
+    }
+
+    private fun candidateDownloadUrls(url: String): List<String> {
+        val result = linkedSetOf<String>()
+        fun add(value: String) {
+            if (value.isNotBlank()) result.add(value)
+        }
+
+        add(url)
+
+        extractBackendProxySourceUrl(url)?.let {
+            add(it)
+            return result.toList()
+        }
+
+        add(url.replace("/play/", "/playwm/"))
+
+        val stripped = stripQueryParam(url, "line")
+        if (stripped != url) {
+            add(stripped)
+            add(stripped.replace("/play/", "/playwm/"))
+        }
+
+        return result.toList()
+    }
+
+    private fun extractBackendProxySourceUrl(url: String): String? {
+        return try {
+            val uri = java.net.URI(url)
+            if (!uri.path.endsWith("/download")) return null
+            uri.rawQuery
+                ?.split("&")
+                ?.firstOrNull { it.substringBefore("=") == "source" }
+                ?.substringAfter("=", "")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun stripQueryParam(url: String, name: String): String {
+        return try {
+            val uri = java.net.URI(url)
+            val rawQuery = uri.rawQuery ?: return url
+            val filteredQuery = rawQuery
+                .split("&")
+                .filter { it.substringBefore("=") != name }
+                .joinToString("&")
+                .ifBlank { null }
+            java.net.URI(uri.scheme, uri.authority, uri.path, filteredQuery, uri.fragment).toString()
+        } catch (_: Exception) {
+            url
         }
     }
 
@@ -2069,6 +2148,17 @@ class DownloadRepository(private val context: Context) {
         if (isKuaishouHost) {
             requestBuilder.header("Referer", "https://www.kuaishou.com/")
             logD("download.headers platform=kuaishou")
+            return
+        }
+
+        val isDouyinHost = host.endsWith("douyin.com") ||
+            host.endsWith("iesdouyin.com") ||
+            host.endsWith("douyinvod.com") ||
+            host.endsWith("douyincdn.com") ||
+            host.endsWith("snssdk.com")
+        if (isDouyinHost) {
+            requestBuilder.header("Referer", "https://www.douyin.com/")
+            logD("download.headers platform=douyin")
         }
     }
 

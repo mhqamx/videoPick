@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw
 
 
-ROOT = Path("/Users/maxiao/Desktop/demo/douyinDownLoad/DouyinDownLoad")
+ROOT = Path(__file__).resolve().parents[1]
 RN_RES = ROOT / "react-native/android/app/src/main/res"
 FLUTTER_RES = ROOT / "flutter/android/app/src/main/res"
 SOURCE_DIR = ROOT / "scripts/generated_icons"

@@ -2,7 +2,7 @@
 //  DouyinDownloadViewModel.swift
 //  DouyinDownLoad
 //
-//  Created by 马霄 on 2026/2/2.
+//  Created by VideoPick Contributors on 2026/2/2.
 //
 
 import Foundation
@@ -31,6 +31,7 @@ class DouyinDownloadViewModel: ObservableObject {
     @Published var saveResult: String?
     @Published var showPreview: Bool = false
     @Published var downloadProgress: Double?
+    @Published var showYuanbaoLogin = false
     @Published var clipboardHint: String?
     @Published var isClipboardAutoDownloadEnabled: Bool = ClipboardAutomationStartupPolicy.startsAutomatically
     @Published var clipboardAutomationState: ClipboardAutomationState = ClipboardAutomationStartupPolicy.startsAutomatically ? .watching : .idle
@@ -45,16 +46,20 @@ class DouyinDownloadViewModel: ObservableObject {
     private var clipboardHintDismissTask: Task<Void, Never>?
     private var clipboardMonitorTask: Task<Void, Never>?
     private var clipboardObserver: NSObjectProtocol?
+    private var activeDownloadID = UUID()
+    private var pendingChannelsDownload: (text: String, autoSave: Bool)?
 
     // MARK: - 公共方法
 
     /// 处理输入并下载视频
     func processInput() {
+        guard !isLoading, !showYuanbaoLogin else { return }
         guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             errorMessage = "请输入分享链接"
             return
         }
 
+        isLoading = true
         downloadTask = Task {
             await downloadVideo()
         }
@@ -62,6 +67,9 @@ class DouyinDownloadViewModel: ObservableObject {
 
     /// 取消下载
     func cancelDownload() {
+        activeDownloadID = UUID()
+        pendingChannelsDownload = nil
+        showYuanbaoLogin = false
         downloadTask?.cancel()
         clipboardScanTask?.cancel()
         downloadTask = nil
@@ -74,7 +82,11 @@ class DouyinDownloadViewModel: ObservableObject {
     }
 
     /// 下载视频
-    func downloadVideo() async {
+    func downloadVideo(autoSaveAfterLogin: Bool = false, didRetryChannelsLogin: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        let attemptID = UUID()
+        activeDownloadID = attemptID
+        let requestedText = inputText
         isLoading = true
         errorMessage = nil
         saveResult = nil
@@ -83,25 +95,60 @@ class DouyinDownloadViewModel: ObservableObject {
         downloadProgress = nil
 
         do {
-            let info = try await service.parseAndDownload(inputText) { [weak self] p in
+            let info = try await service.parseAndDownload(requestedText) { [weak self] p in
                 Task { @MainActor [weak self] in
+                    guard self?.activeDownloadID == attemptID else { return }
                     self?.downloadProgress = p
                 }
             }
+            guard activeDownloadID == attemptID, !Task.isCancelled else { return }
             videoInfo = info
             showPreview = true
-        } catch is CancellationError {
-            // 用户主动取消，不显示错误
-        } catch let error as DouyinDownloadError {
-            errorMessage = error.errorDescription
-        } catch let urlError as URLError {
-            errorMessage = networkErrorDescription(urlError)
         } catch {
-            errorMessage = "未知错误: \(error.localizedDescription) (\(type(of: error)))"
+            guard activeDownloadID == attemptID else { return }
+            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+                // Cancelled operations must not reopen login or replace a newer result.
+            } else if let channelsError = error as? WeChatChannelsError {
+                if channelsError == .loginRequired, !didRetryChannelsLogin {
+                    pendingChannelsDownload = (requestedText, autoSaveAfterLogin)
+                    showYuanbaoLogin = true
+                } else if channelsError == .loginRequired {
+                    errorMessage = "元宝仍无法解析此视频，请稍后重试或在设置中重新登录。"
+                } else { errorMessage = channelsError.errorDescription }
+            } else if let downloadError = error as? DouyinDownloadError {
+                errorMessage = downloadError.errorDescription
+            } else if let urlError = error as? URLError {
+                errorMessage = networkErrorDescription(urlError)
+            } else {
+                errorMessage = "下载失败: \(error.localizedDescription)"
+            }
         }
 
+        guard activeDownloadID == attemptID else { return }
         isLoading = false
         downloadProgress = nil
+    }
+
+    func yuanbaoLoginCompleted() {
+        guard let pending = pendingChannelsDownload else { return }
+        pendingChannelsDownload = nil
+        showYuanbaoLogin = false
+        inputText = pending.text
+        isLoading = true
+        downloadTask = Task {
+            await downloadVideo(autoSaveAfterLogin: pending.autoSave, didRetryChannelsLogin: true)
+            guard !Task.isCancelled, pending.autoSave, videoInfo != nil, errorMessage == nil else { return }
+            clipboardAutomationState = .saving
+            await saveMedia()
+            clipboardAutomationState = errorMessage == nil ? .saved : .failed
+        }
+    }
+
+    func yuanbaoLoginDismissed() {
+        guard pendingChannelsDownload != nil else { return }
+        pendingChannelsDownload = nil
+        showYuanbaoLogin = false
+        if isClipboardAutoDownloadEnabled { clipboardAutomationState = .watching }
     }
 
     /// 保存媒体到相册（根据 mediaType 保存视频或图片）
@@ -189,6 +236,7 @@ class DouyinDownloadViewModel: ObservableObject {
     }
 
     func stopClipboardAutoDownload() {
+        cancelDownload()
         isClipboardAutoDownloadEnabled = false
         clipboardAutomationState = .idle
         downloadTask?.cancel()
@@ -232,6 +280,7 @@ class DouyinDownloadViewModel: ObservableObject {
 
     /// 清空输入
     func clearInput() {
+        cancelDownload()
         inputText = ""
         errorMessage = nil
         saveResult = nil
@@ -284,7 +333,7 @@ class DouyinDownloadViewModel: ObservableObject {
     }
 
     private func scheduleClipboardScan(reason: String) {
-        guard !isLoading else { return }
+        guard !isLoading, !showYuanbaoLogin else { return }
         clipboardScanTask?.cancel()
         clipboardScanTask = Task { @MainActor [weak self] in
             await self?.scanClipboardForAutoDownload(reason: reason)
@@ -292,13 +341,14 @@ class DouyinDownloadViewModel: ObservableObject {
     }
 
     private func scanClipboardForAutoDownload(reason: String) async {
-        guard isClipboardAutoDownloadEnabled, !isLoading else { return }
+        guard isClipboardAutoDownloadEnabled, !isLoading, !showYuanbaoLogin else { return }
 
         clipboardAutomationState = .detecting
         guard await pasteboardLikelyContainsWebURL() else {
             clipboardAutomationState = .watching
             return
         }
+        guard !Task.isCancelled, !isLoading, !showYuanbaoLogin else { return }
 
         guard let clipboardString = UIPasteboard.general.string,
               let candidate = ClipboardAutoDownloadCandidate.resolve(
@@ -315,7 +365,9 @@ class DouyinDownloadViewModel: ObservableObject {
         showClipboardHint("\(reason)捕获到新链接，正在自动下载并保存")
 
         clipboardAutomationState = .downloading
-        await downloadVideo()
+        await downloadVideo(autoSaveAfterLogin: true)
+
+        guard !Task.isCancelled, !showYuanbaoLogin else { return }
 
         guard errorMessage == nil, videoInfo != nil else {
             clipboardAutomationState = .failed

@@ -2,7 +2,7 @@
 //  DouyinDownloadView.swift
 //  DouyinDownLoad
 //
-//  Created by 马霄 on 2026/2/2.
+//  Created by VideoPick Contributors on 2026/2/2.
 //
 
 import SwiftUI
@@ -172,6 +172,9 @@ struct DouyinDownloadView: View {
         .onAppear {
             viewModel.checkClipboardOnForeground()
         }
+        .sheet(isPresented: $viewModel.showYuanbaoLogin, onDismiss: viewModel.yuanbaoLoginDismissed) {
+            YuanbaoLoginView(onAuthenticated: viewModel.yuanbaoLoginCompleted)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 viewModel.checkClipboardOnForeground()
@@ -282,7 +285,7 @@ struct DouyinDownloadView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
 
-                    Text("抖音 / TikTok / Instagram / X / B站 / 快手 / 小红书")
+                    Text("抖音 / 视频号 / TikTok / Instagram / X / B站 / 快手 / 小红书")
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
                         .foregroundStyle(TechPalette.mist)
                         .lineLimit(2)

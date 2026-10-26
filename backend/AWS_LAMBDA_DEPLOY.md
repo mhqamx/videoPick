@@ -12,14 +12,14 @@
 - 超时：`30` 秒
 - 内存：`256 MB`
 - Function URL：
-  `https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws`
+  `https://example.com/resolve
 - 部署包：
-  `/Users/maxiao/Desktop/demo/douyinDownLoad/DouyinDownLoad/backend/douyin-fastapi-lambda.zip`
+  `/Users/your-user/Desktop/demo/douyinDownLoad/DouyinDownLoad/backend/douyin-fastapi-lambda.zip`
 
 ## 进入项目目录
 
 ```bash
-cd /Users/maxiao/Desktop/demo/douyinDownLoad/DouyinDownLoad/backend
+cd /Users/your-user/Desktop/demo/douyinDownLoad/DouyinDownLoad/backend
 ```
 
 ## 登录 AWS CLI
@@ -64,7 +64,7 @@ Lambda -> VideoPick -> Code -> Upload from -> .zip file
 上传文件：
 
 ```text
-/Users/maxiao/Desktop/demo/douyinDownLoad/DouyinDownLoad/backend/douyin-fastapi-lambda.zip
+/Users/your-user/Desktop/demo/douyinDownLoad/DouyinDownLoad/backend/douyin-fastapi-lambda.zip
 ```
 
 ## 更新运行时配置
@@ -105,7 +105,7 @@ Lambda -> VideoPick -> Configuration -> Function URL -> Create function URL
 创建后会得到类似：
 
 ```text
-https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws
+https://example.com/resolve
 ```
 
 ## 测试接口
@@ -113,7 +113,7 @@ https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws
 健康检查：
 
 ```bash
-curl -i https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/health
+curl -i https://example.com/resolve
 ```
 
 预期返回：
@@ -125,7 +125,7 @@ curl -i https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aw
 测试 TikTok 解析：
 
 ```bash
-curl -i -X POST 'https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/resolve' \
+curl -i -X POST 'https://example.com/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://www.tiktok.com/@koudi632/video/7618072232383745287"}'
 ```
@@ -149,7 +149,7 @@ ios/DouyinDownLoad/Services/DouyinDownloadService.swift
 当前配置：
 
 ```swift
-URL(string: "https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/resolve")!,
+URL(string: "https://example.com/resolve")!,
 ```
 
 ## 演示前检查
@@ -157,13 +157,13 @@ URL(string: "https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.
 建议演示前 30 分钟执行：
 
 ```bash
-curl -i https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/health
+curl -i https://example.com/resolve
 ```
 
 再执行一次业务接口：
 
 ```bash
-curl -i -X POST 'https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws/resolve' \
+curl -i -X POST 'https://example.com/resolve \
   -H 'Content-Type: application/json' \
   -d '{"text":"https://www.tiktok.com/@koudi632/video/7618072232383745287"}'
 ```
@@ -181,7 +181,7 @@ aws lambda delete-function-url-config \
 删除 Function URL 后，这个公网地址会失效：
 
 ```text
-https://jv4mmmmt3fw4hq7qdmqmszohbi0jrvhc.lambda-url.ap-northeast-1.on.aws
+https://example.com/resolve
 ```
 
 如果后续完全不用，可以删除整个函数：

@@ -3,10 +3,28 @@ import SwiftUI
 struct CookieSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var cookieValues: [String: [String: String]] = [:]
+    @ObservedObject private var yuanbaoSession = YuanbaoSessionStore.shared
+    @State private var showYuanbaoLogin = false
+    @State private var sessionError: String?
 
     var body: some View {
         NavigationView {
             List {
+                Section {
+                    Label(yuanbaoSession.hasSession ? "已保存登录状态" : "尚未登录", systemImage: "person.crop.circle")
+                    Button(yuanbaoSession.hasSession ? "重新登录元宝" : "登录元宝") { showYuanbaoLogin = true }
+                    if yuanbaoSession.hasSession {
+                        Button("退出元宝登录", role: .destructive) {
+                            do { try yuanbaoSession.clear(); sessionError = nil }
+                            catch { sessionError = error.localizedDescription }
+                        }
+                    }
+                    if let sessionError { Text(sessionError).foregroundStyle(.red).font(.footnote) }
+                } header: {
+                    Text("视频号")
+                } footer: {
+                    Text("首次登录后，粘贴视频号链接即可下载。登录状态仅保存在本机。")
+                }
                 Section {
                     NavigationLink {
                         LocationManagerView()
@@ -66,6 +84,9 @@ struct CookieSettingsView: View {
             }
             .onAppear {
                 loadAll()
+            }
+            .sheet(isPresented: $showYuanbaoLogin) {
+                YuanbaoLoginView(onAuthenticated: {})
             }
         }
     }

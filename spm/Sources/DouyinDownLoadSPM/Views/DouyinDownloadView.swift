@@ -2,7 +2,7 @@
 //  DouyinDownloadView.swift
 //  DouyinDownLoad
 //
-//  Created by 马霄 on 2026/2/2.
+//  Created by VideoPick Contributors on 2026/2/2.
 //
 
 import SwiftUI
