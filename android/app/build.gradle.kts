@@ -18,7 +18,7 @@ val backendLocalProperties = Properties().apply {
     val localFile = rootProject.file("backend.local.properties")
     if (localFile.exists()) localFile.inputStream().use { load(it) }
 }
-val backendResolveUrl = backendLocalProperties.getProperty("resolveUrl", "")
+val backendResolveUrl = backendLocalProperties.getProperty("resolveUrl", "https://maxfreedooom.cn/videopick-api/resolve")
     .replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
