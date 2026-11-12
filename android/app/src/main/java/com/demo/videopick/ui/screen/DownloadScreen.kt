@@ -225,7 +225,7 @@ private fun InputPanel(
 ) {
     Surface(color = PanelSoft, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("支持视频号分享链接，首次下载时登录元宝即可。", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+            Text("视频号首次使用需登录元宝；Instagram / X 需配置 Cookie。所有媒体均直接下载；TikTok / B站暂未支持本地解析。", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(
                 value = state.inputText,
                 onValueChange = { viewModel.updateInput(it) },
@@ -423,7 +423,7 @@ private data class AutomationStatus(
 private fun automationStatus(state: UiState): AutomationStatus {
     return when (state.clipboardAutomationState) {
         ClipboardAutomationState.IDLE -> AutomationStatus("雷达已关闭", "手动粘贴后仍可下载", TextSecondary)
-        ClipboardAutomationState.WATCHING -> AutomationStatus("正在监听剪贴板", "复制分享链接后会自动下载并保存", Cyan)
+        ClipboardAutomationState.WATCHING -> AutomationStatus("正在监听剪贴板", "复制分享链接后返回应用，自动下载并保存", Cyan)
         ClipboardAutomationState.DETECTING -> AutomationStatus("正在扫描", "确认剪贴板里是否有新链接", Amber)
         ClipboardAutomationState.DOWNLOADING -> AutomationStatus("正在下载", "媒体文件进入本地缓存", Cyan)
         ClipboardAutomationState.SAVING -> AutomationStatus("正在保存", "写入系统相册/媒体库", Amber)

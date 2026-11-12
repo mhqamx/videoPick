@@ -143,7 +143,7 @@ class MockLocationService : Service() {
             lm.addTestProvider(
                 provider,
                 false, false, false, false, true, true, true,
-                0, 1
+                ProviderProperties.POWER_USAGE_LOW, ProviderProperties.ACCURACY_FINE
             )
         }
     }

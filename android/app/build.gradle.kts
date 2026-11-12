@@ -18,8 +18,6 @@ val backendLocalProperties = Properties().apply {
     val localFile = rootProject.file("backend.local.properties")
     if (localFile.exists()) localFile.inputStream().use { load(it) }
 }
-val backendResolveUrl = backendLocalProperties.getProperty("resolveUrl", "https://maxfreedooom.cn/videopick-api/resolve")
-    .replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
     namespace = "com.demo.videopick"
@@ -29,9 +27,8 @@ android {
         applicationId = "com.demo.videopick"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
-        buildConfigField("String", "BACKEND_RESOLVE_URL", "\"$backendResolveUrl\"")
+        versionCode = 4
+        versionName = "1.1.2"
     }
 
     signingConfigs {

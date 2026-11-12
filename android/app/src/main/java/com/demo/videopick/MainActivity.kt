@@ -7,21 +7,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import com.demo.videopick.channels.YuanbaoLoginActivity
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -35,6 +33,26 @@ import com.demo.videopick.ui.theme.VideoPickTheme
 import com.demo.videopick.viewmodel.DownloadViewModel
 
 class MainActivity : ComponentActivity() {
+    private val downloadViewModel: DownloadViewModel by viewModels()
+
+    override fun onResume() {
+        super.onResume()
+        downloadViewModel.setClipboardAccessAllowed(window.decorView.hasWindowFocus())
+    }
+
+    override fun onPause() {
+        downloadViewModel.setClipboardAccessAllowed(false)
+        super.onPause()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // RESUMED alone does not mean the window has input focus (Android 10+).
+        downloadViewModel.setClipboardAccessAllowed(
+            hasFocus && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED),
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -85,18 +103,6 @@ fun VideoPickApp(sharedText: String? = null) {
             viewModel.updateInput(sharedText)
             viewModel.startClipboardAutoDownloadIfNeeded(reason = "分享入口")
         }
-    }
-
-    // 前台切换时自动开启剪贴板雷达
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.startClipboardAutoDownloadIfNeeded(reason = "前台唤醒")
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     NavHost(navController = navController, startDestination = "download") {

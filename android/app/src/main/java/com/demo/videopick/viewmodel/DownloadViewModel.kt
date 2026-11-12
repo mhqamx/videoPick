@@ -65,6 +65,7 @@ class DownloadViewModel(application: Application, savedStateHandle: SavedStateHa
     private var lastHandledClipboardFingerprint: String? = null
     private var clipboardHintDismissJob: Job? = null
     private var clipboardMonitorJob: Job? = null
+    private var clipboardAccessAllowed = false
 
     fun updateInput(text: String) {
         _state.value = _state.value.copy(inputText = text)
@@ -167,8 +168,22 @@ class DownloadViewModel(application: Application, savedStateHandle: SavedStateHa
                 clipboardAutomationState = ClipboardAutomationState.DETECTING,
             )
         }
+        if (!clipboardAccessAllowed) return
         beginClipboardMonitoring()
         scheduleClipboardScan(reason)
+    }
+
+    /** Losing focus pauses reads, but does not cancel an already running download. */
+    fun setClipboardAccessAllowed(allowed: Boolean) {
+        if (clipboardAccessAllowed == allowed) return
+        clipboardAccessAllowed = allowed
+        if (!allowed) {
+            clipboardMonitorJob?.cancel()
+            clipboardMonitorJob = null
+        } else if (_state.value.isClipboardAutoDownloadEnabled) {
+            beginClipboardMonitoring()
+            scheduleClipboardScan("前台唤醒")
+        }
     }
 
     fun stopClipboardAutoDownload() {
@@ -186,13 +201,8 @@ class DownloadViewModel(application: Application, savedStateHandle: SavedStateHa
         showClipboardHint("剪贴板雷达已关闭")
     }
 
-    /** 前台切换时自动扫描剪贴板，若内容变化则直接下载并保存。 */
-    fun checkClipboardOnForeground() {
-        startClipboardAutoDownloadIfNeeded(reason = "前台唤醒")
-    }
-
     private fun beginClipboardMonitoring() {
-        if (clipboardMonitorJob != null) return
+        if (!clipboardAccessAllowed || clipboardMonitorJob != null) return
         clipboardMonitorJob = viewModelScope.launch {
             while (true) {
                 delay(CLIPBOARD_SCAN_INTERVAL_MS)
@@ -210,7 +220,7 @@ class DownloadViewModel(application: Application, savedStateHandle: SavedStateHa
     }
 
     private fun scanClipboardForAutoDownload(reason: String) {
-        if (!_state.value.isClipboardAutoDownloadEnabled || _state.value.isLoading || _state.value.showYuanbaoLogin) return
+        if (!clipboardAccessAllowed || !_state.value.isClipboardAutoDownloadEnabled || _state.value.isLoading || _state.value.showYuanbaoLogin) return
 
         // AC13: 首次（cache 为 null）时把已有 inputText 同步进 cache，避免 share intent 等预填导致重复触发
         if (lastClipboardContent == null && _state.value.inputText.isNotEmpty()) {

@@ -1,6 +1,5 @@
 package com.demo.videopick.data.repository
 
-import com.demo.videopick.BuildConfig
 import android.content.ContentValues
 import android.content.Context
 import android.os.Build
@@ -13,8 +12,6 @@ import com.demo.videopick.channels.WeChatChannelsParser
 import com.demo.videopick.channels.WeChatChannelsService
 import com.demo.videopick.channels.YuanbaoSessionStore
 import com.demo.videopick.data.model.MediaType
-import com.demo.videopick.data.model.ResolveRequest
-import com.demo.videopick.data.model.ResolveResponse
 import com.demo.videopick.data.model.VideoInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -26,7 +23,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
-import java.io.FileOutputStream
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import java.util.concurrent.TimeUnit
 
 class DownloadRepository(private val context: Context) {
@@ -86,7 +85,6 @@ class DownloadRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "DownloadRepository"
-        private val BACKEND_URLS = listOf(BuildConfig.BACKEND_RESOLVE_URL).filter(String::isNotBlank)
     }
 
     private val instagramReelPattern = Regex(
@@ -207,16 +205,14 @@ class DownloadRepository(private val context: Context) {
 
     /**
      * Resolve then download media.
-     * Douyin links: local HTML parse first, backend fallback if the share page no longer
-     * exposes playable media data.
-     * Other links: backend first.
+     * All supported platforms resolve locally and download directly from their CDN.
      */
     suspend fun parseAndDownload(
         text: String,
         onProgress: (Float) -> Unit = {},
     ): VideoInfo {
         logD("parse.start inputLength=${text.length}")
-        // This branch deliberately completes before any backend/platform fallback.
+        // Channels keeps its independent direct-service login and download flow.
         WeChatChannelsParser.extract(text)?.let { share ->
             if (WeChatChannelsParser.normalize(share) == null) throw ChannelsException("请使用视频号的普通视频分享链接")
             val info = channelsService.resolve(share, YuanbaoSessionStore(context).cookieHeader())
@@ -241,89 +237,16 @@ class DownloadRepository(private val context: Context) {
         val xhsUrl = extractXiaohongshuUrl(text)
         val kuaishouUrl = extractKuaishouUrl(text)
         logD("parse.detect douyinUrl=${douyinUrl ?: "null"} instagramUrl=${instagramUrl ?: "null"} xUrl=${xUrl ?: "null"} xhsUrl=${xhsUrl ?: "null"} kuaishouUrl=${kuaishouUrl ?: "null"}")
-        var resolvePath = "unknown"
         val videoInfo = when {
-            douyinUrl != null -> {
-                logD("parse.route platform=douyin strategy=local_only")
-                try {
-                    val info = resolveDouyinLocally(douyinUrl)
-                    resolvePath = "local:douyin"
-                    info
-                } catch (localErr: Exception) {
-                    logE("parse.fail local_only platform=douyin", localErr)
-                    throw Exception("抖音本地解析失败: ${localErr.message ?: "未知错误"}")
-                }
-            }
-            instagramUrl != null -> {
-                logD("parse.route platform=instagram strategy=local_only")
-                try {
-                    val info = resolveInstagramLocally(instagramUrl)
-                    resolvePath = "local:instagram"
-                    info
-                } catch (localErr: Exception) {
-                    logE("parse.fail local_only platform=instagram", localErr)
-                    throw Exception("Instagram本地解析失败: ${localErr.message ?: "未知错误"}")
-                }
-            }
-            xUrl != null -> {
-                logD("parse.route platform=x strategy=local_only")
-                try {
-                    val info = resolveXLocally(xUrl)
-                    resolvePath = "local:x"
-                    info
-                } catch (localErr: Exception) {
-                    logE("parse.fail local_only platform=x", localErr)
-                    throw Exception("X本地解析失败: ${localErr.message ?: "未知错误"}")
-                }
-            }
-            xhsUrl != null -> {
-                logD("parse.route platform=xiaohongshu strategy=local_first")
-                try {
-                    val info = resolveXiaohongshuLocally(xhsUrl)
-                    resolvePath = "local:xiaohongshu"
-                    info
-                } catch (localErr: Exception) {
-                    logW("parse.fallback platform=xiaohongshu reason=${localErr.message}")
-                    try {
-                        val info = resolveViaBackend(text)
-                        resolvePath = "backend_after_local_fail:xiaohongshu"
-                        info
-                    } catch (backendErr: Exception) {
-                        logE("parse.fail both_local_and_backend platform=xiaohongshu", backendErr)
-                        throw Exception(
-                            "小红书本地解析失败: ${localErr.message ?: "未知错误"}；服务端解析失败: ${backendErr.message ?: "未知错误"}"
-                        )
-                    }
-                }
-            }
-            kuaishouUrl != null -> {
-                logD("parse.route platform=kuaishou strategy=local_first")
-                try {
-                    val info = resolveKuaishouLocally(kuaishouUrl)
-                    resolvePath = "local:kuaishou"
-                    info
-                } catch (localErr: Exception) {
-                    logW("parse.fallback platform=kuaishou reason=${localErr.message}")
-                    try {
-                        val info = resolveViaBackend(text)
-                        resolvePath = "backend_after_local_fail:kuaishou"
-                        info
-                    } catch (backendErr: Exception) {
-                        logE("parse.fail both_local_and_backend platform=kuaishou", backendErr)
-                        throw Exception(
-                            "快手本地解析失败: ${localErr.message ?: "未知错误"}；服务端解析失败: ${backendErr.message ?: "未知错误"}"
-                        )
-                    }
-                }
-            }
-            else -> {
-                logD("parse.route platform=other strategy=backend")
-                val info = resolveViaBackend(text)
-                resolvePath = "backend:direct"
-                info
-            }
+            douyinUrl != null -> resolveLocally("抖音") { resolveDouyinLocally(douyinUrl) }
+            instagramUrl != null -> resolveLocally("Instagram") { resolveInstagramLocally(instagramUrl) }
+            xUrl != null -> resolveLocally("X") { resolveXLocally(xUrl) }
+            xhsUrl != null -> resolveLocally("小红书") { resolveXiaohongshuLocally(xhsUrl) }
+            kuaishouUrl != null -> resolveLocally("快手") { resolveKuaishouLocally(kuaishouUrl) }
+            else -> throw IllegalArgumentException("暂不支持此链接的本地解析。当前支持抖音、视频号、Instagram、X、快手和小红书；TikTok、B站暂未支持。")
         }
-        logD("parse.resolved path=$resolvePath id=${videoInfo.id} mediaType=${videoInfo.mediaType} downloadUrl=${videoInfo.downloadUrl}")
+        coroutineContext.ensureActive()
+        logD("parse.resolved path=local_only id=${videoInfo.id} mediaType=${videoInfo.mediaType} downloadUrl=${videoInfo.downloadUrl}")
 
         return when (videoInfo.mediaType) {
             MediaType.VIDEO -> {
@@ -348,7 +271,8 @@ class DownloadRepository(private val context: Context) {
                         )
                         logD("parse.download_images item[$index] success path=$path")
                         path
-                    } catch (e: Exception) {
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) {
                         logW("parse.download_images item[$index] failed reason=${e.message}")
                         null
                     }
@@ -364,64 +288,8 @@ class DownloadRepository(private val context: Context) {
     // 抖音本地 HTML 解析（与 iOS 端逻辑一致）
     // ---------------------------------------------------------------
 
-    private fun resolveDouyinLocally(url: String): VideoInfo {
-        val start = System.currentTimeMillis()
-        logD("local.douyin.start url=$url")
-
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .header("Accept-Language", "zh-CN,zh-Hans;q=0.9")
-            .header("Referer", "https://www.douyin.com/")
-            .build()
-
-        douyinLocalClient.newCall(request).execute().use { response ->
-            val finalUrl = response.request.url.toString()
-            if (!response.isSuccessful) {
-                throw Exception("请求失败: HTTP ${response.code}")
-            }
-            val html = response.body?.string() ?: throw Exception("空响应")
-            val info = parseDouyinHtml(html)
-            logD("local.douyin.success status=${response.code} finalUrl=$finalUrl htmlBytes=${html.length} id=${info.id} costMs=${System.currentTimeMillis() - start}")
-            return info
-        }
-    }
-
-    private fun parseDouyinHtml(html: String): VideoInfo {
-        var jsonStr: String? = null
-
-        // 尝试多种 JSON 数据变量名
-        val varNames = listOf("window._ROUTER_DATA", "window._SSR_HYDRATED_DATA")
-        for (varName in varNames) {
-            jsonStr = extractJsonAssignment(html, varName)
-            if (jsonStr != null) break
-        }
-
-        // RENDER_DATA (URL encoded)
-        if (jsonStr == null) {
-            val renderPattern = Regex("""<script[^>]*id="RENDER_DATA"[^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
-            val m = renderPattern.find(html)
-            if (m != null) {
-                jsonStr = java.net.URLDecoder.decode(m.groupValues[1].trim(), "UTF-8")
-            }
-        }
-
-        if (jsonStr != null) {
-            jsonStr = jsonStr.replace("undefined", "null")
-            val info = parseVideoFromJson(jsonStr)
-            if (info != null) return info
-        }
-
-        // Fallback: 从 HTML 中直接提取播放链接
-        parseFromRawHtml(html)?.let { return it }
-
-        val itemId = extractDouyinItemId(html)
-        if (!itemId.isNullOrBlank()) {
-            throw Exception("分享页仅返回作品ID($itemId)，未下发视频播放数据")
-        }
-        throw Exception("未找到视频数据")
-    }
+    private suspend fun resolveDouyinLocally(url: String): VideoInfo =
+        DouyinPageResolver(douyinLocalClient, ::logD).resolve(url, DouyinHtmlParser()::parse)
 
     /** 从 HTML 中提取 `varName = {...}` 赋值语句中的 JSON 对象 */
     private fun extractJsonAssignment(html: String, varName: String): String? {
@@ -453,243 +321,6 @@ class DownloadRepository(private val context: Context) {
             }
         }
         return null
-    }
-
-    private fun parseVideoFromJson(jsonStr: String): VideoInfo? {
-        try {
-            val root = json.parseToJsonElement(jsonStr)
-
-            // 策略1: loaderData -> videoInfoRes -> item_list (ROUTER_DATA 结构)
-            val loaderData = (root as? JsonObject)?.get("loaderData") as? JsonObject
-            if (loaderData != null) {
-                for ((_, value) in loaderData) {
-                    val data = value as? JsonObject ?: continue
-                    val videoInfoRes = data["videoInfoRes"] as? JsonObject ?: continue
-                    val itemList = videoInfoRes["item_list"] as? JsonArray ?: continue
-                    val firstItem = itemList.firstOrNull() as? JsonObject ?: continue
-                    // 图文作品优先检测
-                    if (isDouyinImagePost(firstItem)) {
-                        val info = buildImageInfoFromItem(firstItem)
-                        if (info != null) return info
-                    }
-                    val info = buildVideoInfoFromItem(firstItem)
-                    if (info != null) return info
-                }
-            }
-
-            // 策略2: 先尝试图文
-            val imagesDict = findFirstObject(root, "images")
-            if (imagesDict != null && isDouyinImagePost(imagesDict)) {
-                val info = buildImageInfoFromItem(imagesDict)
-                if (info != null) return info
-            }
-
-            // 策略3: 递归查找包含 "video" 键的字典
-            val awemeDict = findFirstObject(root, "video")
-            if (awemeDict != null) {
-                val info = buildVideoInfoFromItem(awemeDict)
-                if (info != null) return info
-            }
-
-            // 策略4: 递归查找 play_addr.url_list
-            val videoUrl = findBestVideoUrl(root)
-            if (videoUrl != null) {
-                val title = findFirstString(root, "desc")
-                val videoId = findFirstString(root, "aweme_id") ?: "unknown_${System.currentTimeMillis()}"
-                return VideoInfo(
-                    id = videoId,
-                    downloadUrl = normalizeDouyinVideoUrl(videoUrl),
-                    title = title,
-                )
-            }
-
-            return null
-        } catch (_: Exception) {
-            return null
-        }
-    }
-
-    private fun extractDouyinItemId(html: String): String? {
-        val patterns = listOf(
-            Regex(""""itemId"\s*:\s*"(\d+)""""),
-            Regex(""""aweme_id"\s*:\s*"(\d+)""""),
-            Regex("""/(?:share/)?video/(\d+)"""),
-        )
-        for (pattern in patterns) {
-            val match = pattern.find(html)
-            val itemId = match?.groupValues?.getOrNull(1)
-            if (!itemId.isNullOrBlank()) return itemId
-        }
-        return null
-    }
-
-    private fun isDouyinImagePost(item: JsonObject): Boolean {
-        val awemeType = jsonPrimitiveContent(item["aweme_type"])
-        if (awemeType == "2") return true
-        val images = item["images"] as? JsonArray
-        return images != null && images.isNotEmpty()
-    }
-
-    private fun buildImageInfoFromItem(item: JsonObject): VideoInfo? {
-        val images = item["images"] as? JsonArray ?: return null
-        if (images.isEmpty()) return null
-
-        val imageUrls = mutableListOf<String>()
-        for (imgElement in images) {
-            val img = imgElement as? JsonObject ?: continue
-            val urlList = img["url_list"] as? JsonArray ?: continue
-            if (urlList.isEmpty()) continue
-            // 优先选 jpeg/jpg，其次任意可用 URL
-            var chosen: String? = null
-            for (uElement in urlList) {
-                val u = (uElement as? JsonPrimitive)?.content ?: continue
-                if (u.isBlank()) continue
-                if (chosen == null) chosen = u
-                val lower = u.lowercase()
-                if ("jpeg" in lower || "jpg" in lower) {
-                    chosen = u
-                    break
-                }
-            }
-            if (!chosen.isNullOrBlank()) imageUrls.add(chosen)
-        }
-
-        if (imageUrls.isEmpty()) return null
-
-        val awemeId = jsonPrimitiveContent(item["aweme_id"]) ?: "unknown_${System.currentTimeMillis()}"
-        val title = jsonPrimitiveContent(item["desc"])
-
-        logD("local.douyin.image awemeId=$awemeId imageCount=${imageUrls.size}")
-
-        return VideoInfo(
-            id = awemeId,
-            downloadUrl = imageUrls.first(),
-            title = title,
-            mediaType = MediaType.IMAGES,
-            imageUrls = imageUrls,
-        )
-    }
-
-    private fun buildVideoInfoFromItem(item: JsonObject): VideoInfo? {
-        val video = item["video"] as? JsonObject ?: return null
-        val playAddr = video["play_addr"] as? JsonObject ?: return null
-        val urlList = playAddr["url_list"] as? JsonArray ?: return null
-        val firstUrl = (urlList.firstOrNull() as? JsonPrimitive)?.content ?: return null
-
-        val awemeId = (item["aweme_id"] as? JsonPrimitive)?.content
-            ?: "unknown_${System.currentTimeMillis()}"
-        val title = (item["desc"] as? JsonPrimitive)?.content
-
-        return VideoInfo(
-            id = awemeId,
-            downloadUrl = normalizeDouyinVideoUrl(firstUrl),
-            title = title,
-        )
-    }
-
-    private fun findFirstObject(element: JsonElement, key: String, maxDepth: Int = 15): JsonObject? {
-        if (maxDepth <= 0) return null
-        when (element) {
-            is JsonObject -> {
-                if (element.containsKey(key)) return element
-                for ((_, child) in element) {
-                    val found = findFirstObject(child, key, maxDepth - 1)
-                    if (found != null) return found
-                }
-            }
-            is JsonArray -> {
-                for (child in element) {
-                    val found = findFirstObject(child, key, maxDepth - 1)
-                    if (found != null) return found
-                }
-            }
-            else -> {}
-        }
-        return null
-    }
-
-    private fun findFirstString(element: JsonElement, key: String, maxDepth: Int = 15): String? {
-        if (maxDepth <= 0) return null
-        when (element) {
-            is JsonObject -> {
-                val v = element[key]
-                if (v is JsonPrimitive) return v.content
-                for ((_, child) in element) {
-                    val found = findFirstString(child, key, maxDepth - 1)
-                    if (found != null) return found
-                }
-            }
-            is JsonArray -> {
-                for (child in element) {
-                    val found = findFirstString(child, key, maxDepth - 1)
-                    if (found != null) return found
-                }
-            }
-            else -> {}
-        }
-        return null
-    }
-
-    private fun findBestVideoUrl(element: JsonElement, maxDepth: Int = 15): String? {
-        if (maxDepth <= 0) return null
-        when (element) {
-            is JsonObject -> {
-                val playAddr = element["play_addr"] as? JsonObject
-                if (playAddr != null) {
-                    val urlList = playAddr["url_list"] as? JsonArray
-                    val url = (urlList?.firstOrNull() as? JsonPrimitive)?.content
-                    if (url != null) return url
-                }
-                for ((_, child) in element) {
-                    val found = findBestVideoUrl(child, maxDepth - 1)
-                    if (found != null) return found
-                }
-            }
-            is JsonArray -> {
-                for (child in element) {
-                    val found = findBestVideoUrl(child, maxDepth - 1)
-                    if (found != null) return found
-                }
-            }
-            else -> {}
-        }
-        return null
-    }
-
-    private fun parseFromRawHtml(html: String): VideoInfo? {
-        val patterns = listOf(
-            Regex("""(https?:\\/\\/[^"']+aweme\\/v1\\/playwm?\\/[^"']*)""", RegexOption.IGNORE_CASE),
-            Regex("""(https?:\\/\\/[^"']+\.mp4[^"']*)""", RegexOption.IGNORE_CASE),
-            Regex("""(https?://[^"']+aweme/v1/playwm?/[^"']*)""", RegexOption.IGNORE_CASE),
-        )
-
-        for (pattern in patterns) {
-            val m = pattern.find(html)
-            if (m != null) {
-                val raw = m.groupValues[1].replace("\\/", "/")
-                val normalized = normalizeDouyinVideoUrl(raw)
-                return VideoInfo(
-                    id = "unknown_${System.currentTimeMillis()}",
-                    downloadUrl = normalized,
-                )
-            }
-        }
-        return null
-    }
-
-    private fun normalizeDouyinVideoUrl(raw: String): String {
-        var url = raw.replace("playwm", "play")
-        try {
-            val uri = java.net.URI(url)
-            val query = uri.query
-            if (query != null) {
-                val filteredParams = query.split("&")
-                    .filter { !it.startsWith("watermark=") && !it.startsWith("logo_name=") }
-                    .joinToString("&")
-                url = java.net.URI(uri.scheme, uri.authority, uri.path, filteredParams.ifEmpty { null }, null).toString()
-            }
-        } catch (_: Exception) { }
-        return url
     }
 
     // ---------------------------------------------------------------
@@ -1893,274 +1524,9 @@ class DownloadRepository(private val context: Context) {
         return m2?.groupValues?.getOrNull(1)
     }
 
-    // ---------------------------------------------------------------
-    // Backend 解析
-    // ---------------------------------------------------------------
-
-    private fun resolveViaBackend(text: String): VideoInfo {
-        val start = System.currentTimeMillis()
-        logD("backend.resolve.start inputLength=${text.length}")
-        val cookies = CookieStore.allCookies(context)
-            .ifEmpty { null }
-        logD("backend.resolve.cookies platforms=${cookies?.keys?.joinToString(",") ?: "none"}")
-        val requestBody = json.encodeToString(
-            ResolveRequest.serializer(),
-            ResolveRequest(text = text, cookies = cookies),
-        )
-
-        var lastError = "未知错误"
-
-        for ((index, backendUrl) in BACKEND_URLS.withIndex()) {
-            try {
-                logD("backend.resolve.try[$index] url=$backendUrl")
-                val request = Request.Builder()
-                    .url(backendUrl)
-                    .post(requestBody.toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                resolveClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        val body = response.body?.string() ?: ""
-                        lastError = try {
-                            json.decodeFromString<com.demo.videopick.data.model.ErrorResponse>(body).detail
-                        } catch (_: Exception) {
-                            "HTTP ${response.code}"
-                        }
-                        logW("backend.resolve.try[$index] failed status=${response.code} detail=$lastError")
-                        return@use
-                    }
-
-                    val body = response.body?.string() ?: throw Exception("空响应")
-                    val resp = json.decodeFromString<ResolveResponse>(body)
-
-                    val mediaType = if (resp.media_type == "image") MediaType.IMAGES else MediaType.VIDEO
-                    val videoId = resp.video_id?.takeIf { it.isNotBlank() }
-                        ?: "unknown_${System.currentTimeMillis()}"
-
-                    // Normalize download URLs
-                    val downloadUrl = normalizeUrl(resp.download_url, backendUrl)
-                    val imageUrls = resp.image_urls.map { normalizeUrl(it, backendUrl) }
-                    logD(
-                        "backend.resolve.success try[$index] status=${response.code} id=$videoId mediaType=$mediaType " +
-                            "downloadUrl=$downloadUrl imageCount=${imageUrls.size} costMs=${System.currentTimeMillis() - start}"
-                    )
-
-                    return VideoInfo(
-                        id = videoId,
-                        downloadUrl = downloadUrl,
-                        title = resp.title,
-                        mediaType = mediaType,
-                        imageUrls = imageUrls,
-                    )
-                }
-            } catch (e: Exception) {
-                lastError = e.message ?: "网络错误"
-                logW("backend.resolve.try[$index] exception=$lastError")
-            }
-        }
-
-        logE("backend.resolve.fail costMs=${System.currentTimeMillis() - start} lastError=$lastError")
-        throw Exception("服务端解析失败: $lastError")
-    }
-
-    private fun normalizeUrl(raw: String, backendUrl: String): String {
-        if (raw.startsWith("/")) {
-            // Relative path -> append to backend base
-            val base = backendUrl.substringBeforeLast("/")
-            return "$base$raw"
-        }
-        // Replace localhost with actual backend host
-        val lower = raw.lowercase()
-        if ("localhost" in lower || "127.0.0.1" in lower || "::1" in lower) {
-            val backendBase = backendUrl.substringBeforeLast("/resolve")
-            return try {
-                val parsed = java.net.URI(raw)
-                val backendParsed = java.net.URI(backendBase)
-                java.net.URI(
-                    backendParsed.scheme, null,
-                    backendParsed.host, backendParsed.port,
-                    parsed.path, parsed.query, null
-                ).toString()
-            } catch (_: Exception) { raw }
-        }
-        return raw
-    }
-
-    private fun downloadFile(
-        url: String,
-        fileName: String,
-        onProgress: (Float) -> Unit,
-    ): String {
-        val start = System.currentTimeMillis()
-        val candidates = candidateDownloadUrls(url)
-        logD("download.start fileName=$fileName candidates=$candidates")
-
-        var lastStatusCode = -1
-        var lastError: Exception? = null
-
-        for ((index, candidate) in candidates.withIndex()) {
-            try {
-                val requestBuilder = Request.Builder()
-                    .url(candidate)
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
-                    .header("Accept", "*/*")
-                    .header("Range", "bytes=0-")
-                applyPlatformDownloadHeaders(requestBuilder, candidate)
-                val request = requestBuilder.build()
-
-                downloadClient.newCall(request).execute().use { response ->
-                    lastStatusCode = response.code
-                    if (!response.isSuccessful) {
-                        logW("download.try[$index] failed status=${response.code} url=$candidate")
-                        return@use
-                    }
-                    val body = response.body ?: throw Exception("下载失败: 空响应")
-                    logD("download.try[$index] response status=${response.code} contentLength=${body.contentLength()} url=$candidate")
-
-                    val cacheDir = File(context.cacheDir, "downloads")
-                    if (!cacheDir.exists()) cacheDir.mkdirs()
-                    val file = File(cacheDir, fileName)
-
-                    val totalBytes = body.contentLength()
-                    var downloadedBytes = 0L
-
-                    FileOutputStream(file).use { fos ->
-                        val buffer = ByteArray(65536)
-                        val inputStream = body.byteStream()
-                        while (true) {
-                            val read = inputStream.read(buffer)
-                            if (read == -1) break
-                            fos.write(buffer, 0, read)
-                            downloadedBytes += read
-                            if (totalBytes > 0) {
-                                onProgress(downloadedBytes.toFloat() / totalBytes)
-                            }
-                        }
-                    }
-
-                    if (downloadedBytes <= 0) {
-                        throw Exception("下载失败: 空文件")
-                    }
-
-                    onProgress(1f)
-                    logD("download.success path=${file.absolutePath} bytes=$downloadedBytes costMs=${System.currentTimeMillis() - start}")
-                    return file.absolutePath
-                }
-            } catch (e: Exception) {
-                lastError = e
-                logW("download.try[$index] exception=${e.message} url=$candidate")
-            }
-        }
-
-        lastError?.let { throw it }
-        throw Exception("下载失败: HTTP $lastStatusCode")
-    }
-
-    private fun candidateDownloadUrls(url: String): List<String> {
-        val result = linkedSetOf<String>()
-        fun add(value: String) {
-            if (value.isNotBlank()) result.add(value)
-        }
-
-        add(url)
-
-        extractBackendProxySourceUrl(url)?.let {
-            add(it)
-            return result.toList()
-        }
-
-        add(url.replace("/play/", "/playwm/"))
-
-        val stripped = stripQueryParam(url, "line")
-        if (stripped != url) {
-            add(stripped)
-            add(stripped.replace("/play/", "/playwm/"))
-        }
-
-        return result.toList()
-    }
-
-    private fun extractBackendProxySourceUrl(url: String): String? {
-        return try {
-            val uri = java.net.URI(url)
-            if (!uri.path.endsWith("/download")) return null
-            uri.rawQuery
-                ?.split("&")
-                ?.firstOrNull { it.substringBefore("=") == "source" }
-                ?.substringAfter("=", "")
-                ?.takeIf { it.isNotBlank() }
-                ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun stripQueryParam(url: String, name: String): String {
-        return try {
-            val uri = java.net.URI(url)
-            val rawQuery = uri.rawQuery ?: return url
-            val filteredQuery = rawQuery
-                .split("&")
-                .filter { it.substringBefore("=") != name }
-                .joinToString("&")
-                .ifBlank { null }
-            java.net.URI(uri.scheme, uri.authority, uri.path, filteredQuery, uri.fragment).toString()
-        } catch (_: Exception) {
-            url
-        }
-    }
-
-    private fun applyPlatformDownloadHeaders(requestBuilder: Request.Builder, url: String) {
-        val host = try {
-            java.net.URI(url).host?.lowercase()
-        } catch (_: Exception) {
-            null
-        } ?: return
-
-        val isInstagramHost = host == "instagram.com" || host.endsWith(".instagram.com") ||
-            host == "cdninstagram.com" || host.endsWith(".cdninstagram.com") ||
-            host == "fbcdn.net" || host.endsWith(".fbcdn.net")
-        if (isInstagramHost) {
-            requestBuilder.header("Referer", "https://www.instagram.com/")
-            val igCookies = CookieStore.getCookies(context, "instagram")
-            if (igCookies.isNotEmpty()) {
-                requestBuilder.header("Cookie", buildCookieHeader(igCookies))
-            }
-            logD("download.headers platform=instagram cookie=${if (igCookies.isNotEmpty()) "present" else "absent"}")
-            return
-        }
-
-        val isXHost = host == "x.com" || host.endsWith(".x.com") ||
-            host == "twitter.com" || host.endsWith(".twitter.com") ||
-            host == "twimg.com" || host.endsWith(".twimg.com")
-        if (isXHost) {
-            requestBuilder.header("Referer", "https://x.com/")
-            val xCookies = CookieStore.getCookies(context, "x")
-            if (xCookies.isNotEmpty()) {
-                requestBuilder.header("Cookie", buildCookieHeader(xCookies))
-            }
-            logD("download.headers platform=x cookie=${if (xCookies.isNotEmpty()) "present" else "absent"}")
-            return
-        }
-
-        val isKuaishouHost = host.endsWith("kwimgs.com") || host.endsWith("kwai.net") ||
-            host.endsWith("kuaishou.com") || host.endsWith("yximgs.com")
-        if (isKuaishouHost) {
-            requestBuilder.header("Referer", "https://www.kuaishou.com/")
-            logD("download.headers platform=kuaishou")
-            return
-        }
-
-        val isDouyinHost = host.endsWith("douyin.com") ||
-            host.endsWith("iesdouyin.com") ||
-            host.endsWith("douyinvod.com") ||
-            host.endsWith("douyincdn.com") ||
-            host.endsWith("snssdk.com")
-        if (isDouyinHost) {
-            requestBuilder.header("Referer", "https://www.douyin.com/")
-            logD("download.headers platform=douyin")
-        }
-    }
+    private suspend fun downloadFile(url: String, fileName: String, onProgress: (Float) -> Unit): String =
+        MediaDownloader(downloadClient).download(url, File(context.cacheDir, "downloads"), fileName,
+            CookieStore.allCookies(context), onProgress)
 
     /**
      * Save video to gallery via MediaStore.

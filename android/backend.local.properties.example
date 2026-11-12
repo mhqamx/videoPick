@@ -1,2 +1,1 @@
-# Copy to backend.local.properties to override the default ECS backend.
-resolveUrl=https://maxfreedooom.cn/videopick-api/resolve
+# Android now resolves locally; resolveUrl is no longer used.
